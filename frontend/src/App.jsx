@@ -5,7 +5,7 @@ import './styles.css';
 
 const backendUrl = import.meta.env.MODE === 'development'
   ? 'http://localhost:5001'
-  : 'https://<your-backend-service-name>.onrender.com';
+  : import.meta.env.VITE_BACKEND_URL;;
 
 
 function App() {
