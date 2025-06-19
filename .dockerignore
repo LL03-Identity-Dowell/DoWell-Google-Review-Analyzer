@@ -1,0 +1,10 @@
+__pycache__/
+node_modules/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv
+frontend/.vite
+frontend/dist  # remove if copying manually later
