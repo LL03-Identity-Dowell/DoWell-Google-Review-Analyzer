@@ -720,7 +720,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                     time.sleep(0.2)
             except Exception as e:
                 print(f"[⚠️ MORE] Could not expand reviews: {e}")
-                
+
             scroll_count += 1
 
             # # More aggressive scrolling
@@ -806,4 +806,5 @@ def download_csv(session_id):
     )
 
 if __name__ == '__main__':
-    socketio.run(app, port=5001, debug=True)
+    # socketio.run(app, port=5000, debug=True)
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

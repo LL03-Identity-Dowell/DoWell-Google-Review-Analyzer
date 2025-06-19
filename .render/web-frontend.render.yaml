@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: review-analyzer-frontend
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run preview -- --port 10000
+    rootDir: frontend
+    plan: free
+    envVars:
+      - key: VITE_BACKEND_URL
+        value: https://review-analyzer-backend.onrender.com

@@ -3,6 +3,11 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import './styles.css';
 
+const backendUrl = import.meta.env.MODE === 'development'
+  ? 'http://localhost:5001'
+  : 'https://<your-backend-service-name>.onrender.com';
+
+
 function App() {
   const [url, setUrl] = useState('');
   const [days, setDays] = useState('7');
@@ -81,7 +86,7 @@ useEffect(() => {
     console.log('Generated session ID:', id);
     
     // Initialize socket connection with better config
-    socketRef.current = io('http://localhost:5001', {
+    socketRef.current = io(backendUrl, {
       transports: ['websocket', 'polling'],
       timeout: 20000,
       reconnection: true,
@@ -245,7 +250,7 @@ useEffect(() => {
     console.log('Starting new analysis, reviews reset');
 
     try {
-      await axios.post('/api/scrape', { 
+      await axios.post('${backendUrl}/api/scrape', { 
         url: url.trim(), 
         days, 
         customDate, 
@@ -289,7 +294,7 @@ useEffect(() => {
     }
     
     try {
-      const res = await axios.get(`/api/download-csv/${sessionId}`, { 
+      const res = await axios.get(`${backendUrl}/api/download-csv/${sessionId}`, { 
         responseType: 'blob' 
       });
       
