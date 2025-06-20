@@ -75,10 +75,13 @@ function App() {
                 setError(data.status);
             }
 
-            // ✅ If analysis is complete, stop the loading state
-            if (data.progress === 100 || data.status?.includes('complete')) {
+            if (
+                data.progress >= 99 ||
+                (data.status && data.status.toLowerCase().includes("analysis complete"))
+              ) {
                 setLoading(false);
-            }
+              }
+              
         });
         // Improved review handling
         socketRef.current.on('review', (newReviews) => {
@@ -413,15 +416,20 @@ function App() {
                                                 </div>
                                             </td>
                                             <td>
-                                                {review.photo ? (
+                                            {review.photos && review.photos.length > 0 ? (
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                                {review.photos.map((url, idx) => (
                                                     <img
-                                                        src={review.photo}
-                                                        alt="Review photo"
-                                                        className="review-photo"
+                                                    key={idx}
+                                                    src={url}
+                                                    alt={`Review image ${idx + 1}`}
+                                                    style={{ height: '50px', borderRadius: '4px', objectFit: 'cover' }}
                                                     />
-                                                ) : (
-                                                    <span style={{ color: 'var(--text-secondary)' }}>—</span>
-                                                )}
+                                                ))}
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: 'var(--text-secondary)' }}>—</span>
+                                            )}
                                             </td>
                                         </tr>
                                     ))}

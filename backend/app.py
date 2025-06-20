@@ -643,21 +643,32 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                             continue
 
                     # Extract photo if available
-                    photo = None
+                    # photo = None
+                    # try:
+                    #     photo_elements = block.find_elements(
+                    #         By.CSS_SELECTOR, 'img.tz3DLd, img[src*="googleusercontent"]')
+                    #     if photo_elements:
+                    #         photo = photo_elements[0].get_attribute("src")
+                    # except:
+                    #     pass
+
                     try:
-                        photo_elements = block.find_elements(
-                            By.CSS_SELECTOR, 'img.tz3DLd, img[src*="googleusercontent"]')
-                        if photo_elements:
-                            photo = photo_elements[0].get_attribute("src")
+                        photo_elements = block.find_elements(By.CSS_SELECTOR, 'img')
+                        review_photos = [
+                            img.get_attribute("src") 
+                            for img in photo_elements 
+                            if 'googleusercontent.com' in img.get_attribute("src") and 'photo.jpg' in img.get_attribute("src")
+                        ]
                     except:
-                        pass
+                        review_photos = []
+
 
                     review = {
                         "author": author,
                         "rating": rating,
                         "date": parsed_date.strftime("%Y-%m-%d"),
                         "text": text,
-                        "photo": photo
+                        "photo": review_photos
                     }
 
                     reviews.append(review)
@@ -812,3 +823,4 @@ def download_csv(session_id):
 if __name__ == '__main__':
     # socketio.run(app, port=5000, debug=True)
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5001)))
+
