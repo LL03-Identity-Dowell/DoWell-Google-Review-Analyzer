@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: client-dev
+      target: client-build
     container_name: client_container
     ports:
       - '5173:80'
