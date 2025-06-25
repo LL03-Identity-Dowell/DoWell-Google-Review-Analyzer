@@ -74,6 +74,15 @@ def init_driver():
 
     return driver
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for Docker and load balancers"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.datetime.now().isoformat(),
+        'service': 'google-review-analyzer',
+        'version': '1.0.0'
+    }), 200
 
 @app.route('/api/scrape', methods=['POST'])
 def start_scraping():

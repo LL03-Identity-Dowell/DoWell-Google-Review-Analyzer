@@ -1,22 +1,8 @@
 version: '3.9'
 
 services:
-  # Client in development mode
-  client:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: client-build
-    container_name: client_container
-    ports:
-      - '5173:80'
-    restart: always
-    env_file: 
-      - ./.env
-    networks:
-      - queue-net
-    depends_on:
-      - server
+  # Client - Static files served by nginx (production)
+  # Note: Client is built into the nginx image, no separate client service needed
 
   # Backend server
   server:
@@ -31,9 +17,16 @@ services:
     env_file: 
       - ./.env
     environment:
-      - ENVIRONMENT=production  # Change to 'production' for prod
+      - ENVIRONMENT=production
     networks:
       - queue-net
+    # Add healthcheck override if needed
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Nginx reverse proxy
   nginx:
@@ -47,6 +40,7 @@ services:
       - '443:443'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # SSL certificates - make sure these paths exist
       - /etc/letsencrypt/live/googlereviewanalysis.uxlivinglab.org/fullchain.pem:/etc/letsencrypt/live/googlereviewanalysis.uxlivinglab.org/fullchain.pem:ro
       - /etc/letsencrypt/live/googlereviewanalysis.uxlivinglab.org/privkey.pem:/etc/letsencrypt/live/googlereviewanalysis.uxlivinglab.org/privkey.pem:ro
     restart: always
@@ -54,7 +48,6 @@ services:
       - queue-net
     depends_on:
       - server
-      - client
 
 networks:
   queue-net:

@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for the entire application
 
 ###################
-# CLIENT BUILD STAGE
+# CLIENT BUILD STAGE (for production)
 ###################
 FROM node:18-alpine AS client-build
 WORKDIR /app/client
@@ -9,6 +9,17 @@ COPY client/package*.json ./
 RUN npm install
 COPY client/ ./
 RUN npm run build
+
+###################
+# CLIENT DEV STAGE (for development)
+###################
+FROM node:18-alpine AS client-dev
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm install
+COPY client/ ./
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 
 ###################
 # SERVER/BACKEND STAGE  
@@ -74,21 +85,11 @@ USER app
 EXPOSE 5001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:5001/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:5001/health || exit 1
 
 # Default command for production
 CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5001", "app:app"]
-
-###################
-# CLIENT DEV STAGE
-###################
-FROM node:18-alpine AS client-dev
-WORKDIR /app
-COPY client/package*.json ./
-RUN npm install
-EXPOSE 5173
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 
 ###################
 # NGINX STAGE
