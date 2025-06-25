@@ -3,10 +3,10 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import './styles.css';
 
+// Fixed backend URL configuration
 const backendUrl = import.meta.env.MODE === 'development'
     ? 'http://localhost:5001'
-    : import.meta.env.VITE_BACKEND_URL;;
-
+    : window.location.origin; // Use same origin in production
 
 function App() {
     const [url, setUrl] = useState('');
@@ -29,13 +29,20 @@ function App() {
         setSessionId(id);
         console.log('Generated session ID:', id);
 
-        // Initialize socket connection with better config
+        // Initialize socket connection with proper configuration
         socketRef.current = io(backendUrl, {
+            path: '/socket.io/',
             transports: ['websocket', 'polling'],
             timeout: 20000,
             reconnection: true,
             reconnectionAttempts: 5,
-            reconnectionDelay: 1000
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            maxReconnectionAttempts: 5,
+            forceNew: true,
+            // Important for production
+            secure: window.location.protocol === 'https:',
+            rejectUnauthorized: false
         });
 
         socketRef.current.on('connect', () => {
@@ -57,12 +64,24 @@ function App() {
 
         socketRef.current.on('connect_error', (error) => {
             console.error('❌ Socket connection error:', error);
+            setConnectionStatus('error');
             setError('Unable to connect to server. Please check if the backend is running.');
         });
 
         socketRef.current.on('disconnect', (reason) => {
             console.log('🔌 Socket disconnected:', reason);
             setConnectionStatus('disconnected');
+        });
+
+        socketRef.current.on('reconnect', (attemptNumber) => {
+            console.log('🔄 Socket reconnected after', attemptNumber, 'attempts');
+            setConnectionStatus('connected');
+            setError('');
+            
+            // Rejoin session after reconnection
+            if (id) {
+                socketRef.current.emit('join_session', { sessionId: id });
+            }
         });
 
         socketRef.current.on('status_update', (data) => {
@@ -78,11 +97,11 @@ function App() {
             if (
                 data.progress >= 99 ||
                 (data.status && data.status.toLowerCase().includes("analysis complete"))
-              ) {
+            ) {
                 setLoading(false);
-              }
-              
+            }
         });
+
         // Improved review handling
         socketRef.current.on('review', (newReviews) => {
             console.log('📝 Received reviews:', newReviews);
@@ -187,7 +206,7 @@ function App() {
         console.log('Starting new analysis, reviews reset');
 
         try {
-            await axios.post('${backendUrl}/api/scrape', {
+            await axios.post(`${backendUrl}/api/scrape`, {
                 url: url.trim(),
                 days,
                 customDate,
@@ -271,6 +290,14 @@ function App() {
     return (
         <div className="container">
             <h1>🔍 DoWell Google Reviews Analyzer</h1>
+            
+            {/* Connection Status Indicator */}
+            <div className={`connection-status ${connectionStatus}`}>
+                {connectionStatus === 'connected' && '🟢 Connected'}
+                {connectionStatus === 'connecting' && '🟡 Connecting...'}
+                {connectionStatus === 'disconnected' && '🔴 Disconnected'}
+                {connectionStatus === 'error' && '❌ Connection Error'}
+            </div>
 
             <div className="form-section">
                 <div className="form-group">
@@ -324,7 +351,7 @@ function App() {
                     <button
                         className="btn primary"
                         onClick={handleSubmit}
-                        disabled={loading}
+                        disabled={loading || connectionStatus !== 'connected'}
                     >
                         {loading && <span className="loading-spinner"></span>}
                         {loading ? 'Analyzing...' : '🚀 Start Analysis'}
@@ -416,20 +443,20 @@ function App() {
                                                 </div>
                                             </td>
                                             <td>
-                                            {review.photos && review.photos.length > 0 ? (
-                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                                {review.photos.map((url, idx) => (
-                                                    <img
-                                                    key={idx}
-                                                    src={url}
-                                                    alt={`Review image ${idx + 1}`}
-                                                    style={{ height: '50px', borderRadius: '4px', objectFit: 'cover' }}
-                                                    />
-                                                ))}
-                                                </div>
-                                            ) : (
-                                                <span style={{ color: 'var(--text-secondary)' }}>—</span>
-                                            )}
+                                                {review.photo && review.photo.length > 0 ? (
+                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                                        {review.photo.map((url, idx) => (
+                                                            <img
+                                                                key={idx}
+                                                                src={url}
+                                                                alt={`Review image ${idx + 1}`}
+                                                                style={{ height: '50px', borderRadius: '4px', objectFit: 'cover' }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span style={{ color: 'var(--text-secondary)' }}>—</span>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
