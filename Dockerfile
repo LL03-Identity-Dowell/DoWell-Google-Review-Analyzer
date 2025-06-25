@@ -88,7 +88,6 @@ EXPOSE 5001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5001/health || exit 1
 
-# Default command for production
 CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5001", "app:app"]
 
 ###################
