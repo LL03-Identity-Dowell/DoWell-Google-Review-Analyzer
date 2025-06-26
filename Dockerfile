@@ -22,7 +22,7 @@ EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 
 ###################
-# SERVER/BACKEND STAGE  
+# SERVER/BACKEND STAGE
 ###################
 FROM python:3.9-slim AS server
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -49,32 +49,15 @@ RUN apt-get update && apt-get install -y \
     google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver using the new method
-RUN CHROME_VERSION=$(google-chrome --version | cut -d " " -f3 | cut -d "." -f1-3) \
-    && echo "Chrome version: $CHROME_VERSION" \
-    && if [ $(echo $CHROME_VERSION | cut -d "." -f1) -ge 115 ]; then \
-        # For Chrome 115+ use Chrome for Testing API
-        CHROMEDRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE") \
-        && echo "ChromeDriver version: $CHROMEDRIVER_VERSION" \
-        && wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" \
-        && unzip /tmp/chromedriver.zip -d /tmp/ \
-        && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver; \
-    else \
-        # For older Chrome versions use the legacy method
-        CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") \
-        && wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" \
-        && unzip /tmp/chromedriver.zip -d /tmp/ \
-        && mv /tmp/chromedriver /usr/local/bin/chromedriver; \
-    fi \
-    && chmod +x /usr/local/bin/chromedriver \
-    && rm -rf /tmp/chromedriver* \
-    && chromedriver --version
+# ✅ Copy pre-downloaded ChromeDriver from server folder
+COPY server/chromedriver /usr/local/bin/chromedriver
+RUN chmod +x /usr/local/bin/chromedriver && chromedriver --version
 
 # Copy and install Python dependencies
 COPY server/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy server code
+# Copy backend application code
 COPY server/ ./
 
 # Create non-root user

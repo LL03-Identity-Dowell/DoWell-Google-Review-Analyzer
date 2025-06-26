@@ -32,47 +32,73 @@ socketio = SocketIO(app,
 SESSIONS = {}
 ACTIVE_JOBS = {}
 
-
 def init_driver():
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument(
-        '--disable-blink-features=AutomationControlled')
+    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
     chrome_options.add_argument('--window-size=1920,1080')
     chrome_options.add_argument(
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    )
 
-    # Try to use local chromedriver if it exists
-    local_driver_path = os.path.join(os.getcwd(), 'chromedriver')
-    if os.path.exists(local_driver_path) and os.access(local_driver_path, os.X_OK):
-        driver_path = local_driver_path
-    else:
-        # Use webdriver-manager to download (requires internet)
-        raw_path = ChromeDriverManager().install()
-        dir_path = os.path.dirname(raw_path)
+    # Use the chromedriver path set in Docker image
+    driver_path = "/usr/local/bin/chromedriver"
 
-        # Find the actual executable
-        driver_path = None
-        for fname in os.listdir(dir_path):
-            full_path = os.path.join(dir_path, fname)
-            if "chromedriver" in fname and os.access(full_path, os.X_OK) and not fname.endswith(".chromedriver"):
-                driver_path = full_path
-                break
-
-        if not driver_path:
-            raise Exception("Failed to find a valid chromedriver executable.")
+    if not os.path.exists(driver_path) or not os.access(driver_path, os.X_OK):
+        raise FileNotFoundError(f"ChromeDriver not found or not executable at: {driver_path}")
 
     service = Service(driver_path)
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    # Hide webdriver flag
+    # Stealth mode: hide navigator.webdriver flag
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
 
     return driver
+
+# def init_driver():
+#     chrome_options = Options()
+#     chrome_options.add_argument('--headless')
+#     chrome_options.add_argument('--no-sandbox')
+#     chrome_options.add_argument('--disable-dev-shm-usage')
+#     chrome_options.add_argument(
+#         '--disable-blink-features=AutomationControlled')
+#     chrome_options.add_argument('--window-size=1920,1080')
+#     chrome_options.add_argument(
+#         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+
+#     # Try to use local chromedriver if it exists
+#     local_driver_path = os.path.join(os.getcwd(), 'chromedriver')
+#     if os.path.exists(local_driver_path) and os.access(local_driver_path, os.X_OK):
+#         driver_path = local_driver_path
+#     else:
+#         # Use webdriver-manager to download (requires internet)
+#         raw_path = ChromeDriverManager().install()
+#         dir_path = os.path.dirname(raw_path)
+
+#         # Find the actual executable
+#         driver_path = None
+#         for fname in os.listdir(dir_path):
+#             full_path = os.path.join(dir_path, fname)
+#             if "chromedriver" in fname and os.access(full_path, os.X_OK) and not fname.endswith(".chromedriver"):
+#                 driver_path = full_path
+#                 break
+
+#         if not driver_path:
+#             raise Exception("Failed to find a valid chromedriver executable.")
+
+#     service = Service(driver_path)
+#     driver = webdriver.Chrome(service=service, options=chrome_options)
+
+#     # Hide webdriver flag
+#     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+#         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+#     })
+
+#     return driver
 
 @app.route('/health', methods=['GET'])
 def health_check():
