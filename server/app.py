@@ -20,7 +20,13 @@ from selenium import webdriver
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room
 from flask import Flask, request, jsonify, send_file
-
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+import textwrap
 
 app = Flask(__name__)
 CORS(app)
@@ -58,47 +64,6 @@ def init_driver():
     })
 
     return driver
-
-# def init_driver():
-#     chrome_options = Options()
-#     chrome_options.add_argument('--headless')
-#     chrome_options.add_argument('--no-sandbox')
-#     chrome_options.add_argument('--disable-dev-shm-usage')
-#     chrome_options.add_argument(
-#         '--disable-blink-features=AutomationControlled')
-#     chrome_options.add_argument('--window-size=1920,1080')
-#     chrome_options.add_argument(
-#         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-
-#     # Try to use local chromedriver if it exists
-#     local_driver_path = os.path.join(os.getcwd(), 'chromedriver')
-#     if os.path.exists(local_driver_path) and os.access(local_driver_path, os.X_OK):
-#         driver_path = local_driver_path
-#     else:
-#         # Use webdriver-manager to download (requires internet)
-#         raw_path = ChromeDriverManager().install()
-#         dir_path = os.path.dirname(raw_path)
-
-#         # Find the actual executable
-#         driver_path = None
-#         for fname in os.listdir(dir_path):
-#             full_path = os.path.join(dir_path, fname)
-#             if "chromedriver" in fname and os.access(full_path, os.X_OK) and not fname.endswith(".chromedriver"):
-#                 driver_path = full_path
-#                 break
-
-#         if not driver_path:
-#             raise Exception("Failed to find a valid chromedriver executable.")
-
-#     service = Service(driver_path)
-#     driver = webdriver.Chrome(service=service, options=chrome_options)
-
-#     # Hide webdriver flag
-#     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-#         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-#     })
-
-#     return driver
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -240,109 +205,239 @@ def parse_relative_date(text):
     print(f"[⚠️ DATE] Could not parse date: '{text}', using current time")
     return now
 
-
-def analyze_sentiment(reviews):
-    """Simple sentiment analysis based on ratings and keywords"""
-    if not reviews:
-        return "No reviews to analyze"
-
-    total_reviews = len(reviews)
-    avg_rating = sum(r['rating'] for r in reviews) / total_reviews
-
-    # Count positive/negative keywords
-    positive_words = ['great', 'excellent', 'amazing', 'wonderful',
-                      'fantastic', 'love', 'perfect', 'best', 'awesome', 'outstanding']
-    negative_words = ['terrible', 'awful', 'horrible', 'worst',
-                      'hate', 'disgusting', 'poor', 'bad', 'disappointing', 'rude']
-
-    positive_count = 0
-    negative_count = 0
-
-    for review in reviews:
-        text = review['text'].lower()
-        positive_count += sum(1 for word in positive_words if word in text)
-        negative_count += sum(1 for word in negative_words if word in text)
-
-    sentiment = "Neutral"
-    if avg_rating >= 4.0:
-        sentiment = "Very Positive"
-    elif avg_rating >= 3.5:
-        sentiment = "Positive"
-    elif avg_rating >= 2.5:
-        sentiment = "Mixed"
-    elif avg_rating >= 2.0:
-        sentiment = "Negative"
-    else:
-        sentiment = "Very Negative"
-
-    return f"{sentiment} - Average rating: {avg_rating:.1f}/5.0 stars. Analyzed from {total_reviews} reviews with {positive_count} positive mentions and {negative_count} negative mentions."
-
-
-def generate_swot_analysis(reviews):
-    """Generate SWOT analysis based on review content"""
-    if not reviews:
-        return {'strengths': [], 'weaknesses': [], 'opportunities': [], 'threats': []}
-
-    # Keywords mapping for SWOT
-    strength_keywords = ['excellent', 'great', 'amazing', 'professional',
-                         'friendly', 'clean', 'quality', 'fast', 'convenient']
-    weakness_keywords = ['slow', 'expensive', 'rude', 'dirty',
-                         'poor', 'bad', 'disappointing', 'unprofessional']
-    opportunity_keywords = ['recommend', 'potential',
-                            'expand', 'improve', 'better', 'more']
-    threat_keywords = ['competition', 'expensive',
-                       'alternative', 'switching', 'leaving']
-
-    strengths = []
-    weaknesses = []
-    opportunities = []
-    threats = []
-
-    # Analyze high-rated reviews for strengths
-    high_rated = [r for r in reviews if r['rating'] >= 4]
-    for review in high_rated:
-        text = review['text'].lower()
-        for keyword in strength_keywords:
-            if keyword in text and len(strengths) < 5:
-                strengths.append(
-                    f"Customers appreciate {keyword} service/experience")
-                break
-
-    # Analyze low-rated reviews for weaknesses
-    low_rated = [r for r in reviews if r['rating'] <= 2]
-    for review in low_rated:
-        text = review['text'].lower()
-        for keyword in weakness_keywords:
-            if keyword in text and len(weaknesses) < 5:
-                weaknesses.append(
-                    f"Issues with {keyword} service/experience mentioned")
-                break
-
-    # Generate general insights
-    avg_rating = sum(r['rating'] for r in reviews) / len(reviews)
-    if avg_rating >= 4.0:
-        strengths.append("High average customer satisfaction rating")
-
-    if len(high_rated) > len(low_rated) * 2:
-        strengths.append("Strong positive review ratio")
-
-    if len(low_rated) > len(reviews) * 0.3:
-        weaknesses.append("Significant number of negative reviews")
-
-    opportunities.append("Opportunity to address negative feedback")
-    opportunities.append(
-        "Potential to leverage positive reviews for marketing")
-
-    if len(low_rated) > 0:
-        threats.append("Risk of reputation damage from negative reviews")
-
-    return {
-        'strengths': strengths[:5],
-        'weaknesses': weaknesses[:5],
-        'opportunities': opportunities[:5],
-        'threats': threats[:5]
+def extract_business_details(driver):
+    """Extract business details from Google Maps page"""
+    business_details = {
+        'name': '',
+        'address': '',
+        'phone': '',
+        'website': '',
+        'hours': '',
+        'rating': '',
+        'total_reviews': '',
+        'category': '',
+        'description': ''
     }
+    
+    try:
+        # Business name
+        name_selectors = [
+            'h1[data-attrid="title"]',
+            'h1.DUwDvf',
+            'h1.fontHeadlineLarge',
+            '[data-attrid="title"] h1',
+            'h1'
+        ]
+        
+        for selector in name_selectors:
+            try:
+                name_element = driver.find_element(By.CSS_SELECTOR, selector)
+                business_details['name'] = name_element.text.strip()
+                break
+            except:
+                continue
+        
+        # Address
+        address_selectors = [
+            '[data-item-id="address"] .Io6YTe',
+            '[data-value="Address"] .Io6YTe',
+            '[data-attrid="kc:/location/location:address"]',
+            '.Io6YTe'
+        ]
+        
+        for selector in address_selectors:
+            try:
+                address_element = driver.find_element(By.CSS_SELECTOR, selector)
+                business_details['address'] = address_element.text.strip()
+                break
+            except:
+                continue
+        
+        # Phone number
+        phone_selectors = [
+            '[data-item-id="phone"] .Io6YTe',
+            '[data-value="Phone"] .Io6YTe',
+            '[data-attrid="kc:/business/telephone"]',
+            'span[data-dtype="d3ifr"]'
+        ]
+        
+        for selector in phone_selectors:
+            try:
+                phone_element = driver.find_element(By.CSS_SELECTOR, selector)
+                business_details['phone'] = phone_element.text.strip()
+                break
+            except:
+                continue
+        
+        # Website
+        website_selectors = [
+            '[data-item-id="authority"] a',
+            '[data-value="Website"] a',
+            'a[data-value="Website"]'
+        ]
+        
+        for selector in website_selectors:
+            try:
+                website_element = driver.find_element(By.CSS_SELECTOR, selector)
+                business_details['website'] = website_element.get_attribute('href')
+                break
+            except:
+                continue
+        
+        # Overall rating and total reviews
+        try:
+            rating_element = driver.find_element(By.CSS_SELECTOR, '.F7nice span[aria-hidden="true"]')
+            business_details['rating'] = rating_element.text.strip()
+        except:
+            try:
+                rating_element = driver.find_element(By.CSS_SELECTOR, '.ceNzKf')
+                business_details['rating'] = rating_element.text.strip()
+            except:
+                pass
+        
+        try:
+            reviews_element = driver.find_element(By.CSS_SELECTOR, '.F7nice .bC3Nkc')
+            business_details['total_reviews'] = reviews_element.text.strip()
+        except:
+            try:
+                reviews_element = driver.find_element(By.CSS_SELECTOR, '.HHrUdb')
+                business_details['total_reviews'] = reviews_element.text.strip()
+            except:
+                pass
+        
+        # Category
+        try:
+            category_element = driver.find_element(By.CSS_SELECTOR, '.DkEaL')
+            business_details['category'] = category_element.text.strip()
+        except:
+            pass
+        
+        # Hours
+        try:
+            hours_element = driver.find_element(By.CSS_SELECTOR, '[data-item-id="oh"] .Io6YTe')
+            business_details['hours'] = hours_element.text.strip()
+        except:
+            pass
+        
+        print(f"[🏢 BUSINESS] Extracted details: {business_details}")
+        
+    except Exception as e:
+        print(f"[⚠️ BUSINESS] Error extracting business details: {e}")
+    
+    return business_details
 
+def generate_pdf_report(business_details, reviews, session_id):
+    """Generate PDF report with business details and reviews"""
+    filename = f"business_report_{session_id}.pdf"
+    filepath = f"/tmp/{filename}"
+    
+    doc = SimpleDocTemplate(filepath, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#2563eb')
+    )
+    
+    section_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.HexColor('#1f2937')
+    )
+    
+    # Title
+    story.append(Paragraph("Business Analysis Report", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Business Details Section
+    story.append(Paragraph("Business Information", section_style))
+    
+    business_data = [
+        ['Business Name:', business_details.get('name', 'N/A')],
+        ['Address:', business_details.get('address', 'N/A')],
+        ['Phone:', business_details.get('phone', 'N/A')],
+        ['Website:', business_details.get('website', 'N/A')],
+        ['Category:', business_details.get('category', 'N/A')],
+        ['Overall Rating:', business_details.get('rating', 'N/A')],
+        ['Total Reviews:', business_details.get('total_reviews', 'N/A')],
+        ['Hours:', business_details.get('hours', 'N/A')]
+    ]
+    
+    business_table = Table(business_data, colWidths=[2*inch, 4*inch])
+    business_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f4f6')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    
+    story.append(business_table)
+    story.append(Spacer(1, 30))
+    
+    # Reviews Section
+    story.append(Paragraph(f"Customer Reviews ({len(reviews)} reviews)", section_style))
+    story.append(Spacer(1, 10))
+    
+    for i, review in enumerate(reviews, 1):
+        # Review header
+        review_header = f"Review #{i} - {review['author']} - {review['rating']}⭐ - {review['date']}"
+        story.append(Paragraph(review_header, styles['Heading3']))
+        
+        # Review text
+        review_text = review.get('text', 'No text provided')
+        wrapped_text = textwrap.fill(review_text, width=80)
+        story.append(Paragraph(wrapped_text, styles['Normal']))
+        story.append(Spacer(1, 15))
+    
+    doc.build(story)
+    return filepath
+
+def generate_txt_report(business_details, reviews, session_id):
+    """Generate TXT report with business details and reviews"""
+    filename = f"business_report_{session_id}.txt"
+    filepath = f"/tmp/{filename}"
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write("BUSINESS ANALYSIS REPORT\n")
+        f.write("=" * 50 + "\n\n")
+        
+        # Business Details
+        f.write("BUSINESS INFORMATION\n")
+        f.write("-" * 20 + "\n")
+        f.write(f"Business Name: {business_details.get('name', 'N/A')}\n")
+        f.write(f"Address: {business_details.get('address', 'N/A')}\n")
+        f.write(f"Phone: {business_details.get('phone', 'N/A')}\n")
+        f.write(f"Website: {business_details.get('website', 'N/A')}\n")
+        f.write(f"Category: {business_details.get('category', 'N/A')}\n")
+        f.write(f"Overall Rating: {business_details.get('rating', 'N/A')}\n")
+        f.write(f"Total Reviews: {business_details.get('total_reviews', 'N/A')}\n")
+        f.write(f"Hours: {business_details.get('hours', 'N/A')}\n\n")
+        
+        # Reviews
+        f.write(f"CUSTOMER REVIEWS ({len(reviews)} reviews)\n")
+        f.write("-" * 30 + "\n\n")
+        
+        for i, review in enumerate(reviews, 1):
+            f.write(f"Review #{i}\n")
+            f.write(f"Author: {review['author']}\n")
+            f.write(f"Rating: {review['rating']}⭐\n")
+            f.write(f"Date: {review['date']}\n")
+            f.write(f"Review: {review.get('text', 'No text provided')}\n")
+            f.write("-" * 50 + "\n\n")
+    
+    return filepath
 
 def scrape_and_analyze(url, days, custom_date, email, session_id):
     driver = init_driver()
@@ -352,6 +447,14 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                       'progress': 5, 'status': 'Loading Google Maps page...'}, room=session_id)
         driver.get(url)
         time.sleep(3)
+
+        socketio.emit('status_update', {
+                      'progress': 8, 'status': 'Extracting business information...'}, room=session_id)
+        
+        business_details = extract_business_details(driver)
+        
+        # Emit business details to frontend
+        socketio.emit('business_details', business_details, room=session_id)
 
         if custom_date:
             cutoff_date = datetime.datetime.strptime(custom_date, "%Y-%m-%d")
@@ -677,16 +780,6 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                         except:
                             continue
 
-                    # Extract photo if available
-                    # photo = None
-                    # try:
-                    #     photo_elements = block.find_elements(
-                    #         By.CSS_SELECTOR, 'img.tz3DLd, img[src*="googleusercontent"]')
-                    #     if photo_elements:
-                    #         photo = photo_elements[0].get_attribute("src")
-                    # except:
-                    #     pass
-
                     try:
                         photo_elements = block.find_elements(By.CSS_SELECTOR, 'img')
                         review_photos = [
@@ -794,18 +887,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
 
         # Store reviews in session for CSV download
         SESSIONS[session_id] = reviews
-
-        # Generate and emit sentiment analysis
-        socketio.emit('status_update', {
-                      'progress': 92, 'status': 'Analyzing sentiment...'}, room=session_id)
-        sentiment = analyze_sentiment(reviews)
-        socketio.emit('sentiment_update', {'text': sentiment}, room=session_id)
-
-        # Generate and emit SWOT analysis
-        socketio.emit('status_update', {
-                      'progress': 95, 'status': 'Generating SWOT analysis...'}, room=session_id)
-        swot = generate_swot_analysis(reviews)
-        socketio.emit('swot_update', swot, room=session_id)
+        SESSIONS[f"{session_id}_business"] = business_details
 
         driver.quit()
 
@@ -853,6 +935,34 @@ def download_csv(session_id):
         as_attachment=True,
         download_name=f'reviews_{session_id}.csv'
     )
+
+@app.route('/api/download-pdf/<session_id>', methods=['GET'])
+def download_pdf(session_id):
+    reviews = SESSIONS.get(session_id, [])
+    business_details = SESSIONS.get(f"{session_id}_business", {})
+    
+    if not reviews:
+        return jsonify({'error': 'No data'}), 404
+    
+    try:
+        filepath = generate_pdf_report(business_details, reviews, session_id)
+        return send_file(filepath, as_attachment=True, download_name=f'business_report_{session_id}.pdf')
+    except Exception as e:
+        return jsonify({'error': f'Failed to generate PDF: {str(e)}'}), 500
+
+@app.route('/api/download-txt/<session_id>', methods=['GET'])
+def download_txt(session_id):
+    reviews = SESSIONS.get(session_id, [])
+    business_details = SESSIONS.get(f"{session_id}_business", {})
+    
+    if not reviews:
+        return jsonify({'error': 'No data'}), 404
+    
+    try:
+        filepath = generate_txt_report(business_details, reviews, session_id)
+        return send_file(filepath, as_attachment=True, download_name=f'business_report_{session_id}.txt')
+    except Exception as e:
+        return jsonify({'error': f'Failed to generate TXT: {str(e)}'}), 500
 
 
 if __name__ == '__main__':
