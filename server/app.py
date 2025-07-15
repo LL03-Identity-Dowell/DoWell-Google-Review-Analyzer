@@ -308,7 +308,7 @@ def extract_business_details(driver):
         for selector in website_selectors:
             try:
                 website_element = driver.find_element(By.CSS_SELECTOR, selector)
-                business_details['website'] = website_element.get_attribute('href')
+                business_details['website'] = website_element.get_attribute('href') or ''
                 break
             except:
                 continue
@@ -994,9 +994,109 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
             # Initialize driver for this URL
             driver = init_driver()
             
-            # Extract business details
-            business_details = extract_business_details(driver)
-            
+            # Extract business details robustly before scraping reviews
+            business_details = {
+                'name': '',
+                'address': '',
+                'phone': '',
+                'website': '',
+                'hours': '',
+                'rating': '',
+                'total_reviews': '',
+                'category': '',
+                'description': ''
+            }
+            try:
+                # Business name
+                name_selectors = [
+                    'h1[data-attrid="title"]',
+                    'h1.DUwDvf',
+                    'h1.fontHeadlineLarge',
+                    '[data-attrid="title"] h1',
+                    'h1'
+                ]
+                for selector in name_selectors:
+                    try:
+                        name_element = driver.find_element(By.CSS_SELECTOR, selector)
+                        business_details['name'] = name_element.text.strip()
+                        break
+                    except:
+                        continue
+                # Address
+                address_selectors = [
+                    '[data-item-id="address"] .Io6YTe',
+                    '[data-value="Address"] .Io6YTe',
+                    '[data-attrid="kc:/location/location:address"]',
+                    '.Io6YTe'
+                ]
+                for selector in address_selectors:
+                    try:
+                        address_element = driver.find_element(By.CSS_SELECTOR, selector)
+                        business_details['address'] = address_element.text.strip()
+                        break
+                    except:
+                        continue
+                # Phone number
+                phone_selectors = [
+                    '[data-item-id="phone"] .Io6YTe',
+                    '[data-value="Phone"] .Io6YTe',
+                    '[data-attrid="kc:/business/telephone"]',
+                    'span[data-dtype="d3ifr"]'
+                ]
+                for selector in phone_selectors:
+                    try:
+                        phone_element = driver.find_element(By.CSS_SELECTOR, selector)
+                        business_details['phone'] = phone_element.text.strip()
+                        break
+                    except:
+                        continue
+                # Website
+                website_selectors = [
+                    '[data-item-id="authority"] a',
+                    '[data-value="Website"] a',
+                    'a[data-value="Website"]'
+                ]
+                for selector in website_selectors:
+                    try:
+                        website_element = driver.find_element(By.CSS_SELECTOR, selector)
+                        business_details['website'] = website_element.get_attribute('href') or ''
+                        break
+                    except:
+                        continue
+                # Overall rating and total reviews
+                try:
+                    rating_element = driver.find_element(By.CSS_SELECTOR, '.F7nice span[aria-hidden="true"]')
+                    business_details['rating'] = rating_element.text.strip()
+                except:
+                    try:
+                        rating_element = driver.find_element(By.CSS_SELECTOR, '.ceNzKf')
+                        business_details['rating'] = rating_element.text.strip()
+                    except:
+                        pass
+                try:
+                    reviews_element = driver.find_element(By.CSS_SELECTOR, '.F7nice .bC3Nkc')
+                    business_details['total_reviews'] = reviews_element.text.strip()
+                except:
+                    try:
+                        reviews_element = driver.find_element(By.CSS_SELECTOR, '.HHrUdb')
+                        business_details['total_reviews'] = reviews_element.text.strip()
+                    except:
+                        pass
+                # Category
+                try:
+                    category_element = driver.find_element(By.CSS_SELECTOR, '.DkEaL')
+                    business_details['category'] = category_element.text.strip()
+                except:
+                    pass
+                # Hours
+                try:
+                    hours_element = driver.find_element(By.CSS_SELECTOR, '[data-item-id="oh"] .Io6YTe')
+                    business_details['hours'] = hours_element.text.strip()
+                except:
+                    pass
+                print(f"[🏢 BUSINESS] Extracted details: {business_details}")
+            except Exception as e:
+                print(f"[⚠️ BUSINESS] Error extracting business details: {e}")
             # Emit business details
             socketio.emit('business_details', {
                 'url': url,
@@ -1110,10 +1210,33 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                         if not author:
                             author = "Anonymous"
                         
-                        # Extract review data
-                        rating_element = block.find_element(By.CSS_SELECTOR, '.kvMYJc')
-                        rating = len(rating_element.find_elements(By.CSS_SELECTOR, '.QqG1Sd'))
+                        # Extract rating with multiple approaches (robust)
+                        rating = 0
+                        try:
+                            # Method 1: aria-label approach
+                            rating_element = block.find_element(By.CSS_SELECTOR, "span[class*='kvMYJc']")
+                            aria_label = rating_element.get_attribute("aria-label") or ""
+                            rating_match = re.search(r'(\d+(?:\.\d+)?)', aria_label)
+                            if rating_match:
+                                rating = float(rating_match.group(1))
+                        except:
+                            try:
+                                # Method 2: count filled stars
+                                stars = block.find_elements(By.CSS_SELECTOR, "span[style*='width']")
+                                if stars:
+                                    style = stars[0].get_attribute("style") or ""
+                                    width_match = re.search(r'width:\\s*(\d+)%', style)
+                                    if width_match:
+                                        rating = float(width_match.group(1)) / 20  # 100% = 5 stars
+                            except:
+                                try:
+                                    # Method 3: look for star elements
+                                    star_elements = block.find_elements(By.CSS_SELECTOR, ".kvMYJc")
+                                    rating = len(star_elements)
+                                except:
+                                    pass
                         
+                        # Extract review data continues...
                         # Parse date
                         date_text = block.find_element(By.CSS_SELECTOR, '.rsqaWe').text.strip()
                         parsed_date = parse_relative_date(date_text)
