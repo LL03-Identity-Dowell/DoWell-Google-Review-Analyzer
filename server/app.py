@@ -1097,8 +1097,20 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                         if review_id in processed_review_ids:
                             continue
                             
+                        # Extract author with multiple selectors (robust)
+                        author = ""
+                        author_selectors = [".d4r55", ".YBMEb", "div[data-href*='contrib']"]
+                        for author_selector in author_selectors:
+                            try:
+                                author_element = block.find_element(By.CSS_SELECTOR, author_selector)
+                                author = author_element.text.strip()
+                                break
+                            except:
+                                continue
+                        if not author:
+                            author = "Anonymous"
+                        
                         # Extract review data
-                        author = block.find_element(By.CSS_SELECTOR, '.d4r55').text.strip()
                         rating_element = block.find_element(By.CSS_SELECTOR, '.kvMYJc')
                         rating = len(rating_element.find_elements(By.CSS_SELECTOR, '.QqG1Sd'))
                         
