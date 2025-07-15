@@ -107,9 +107,6 @@ function App() {
         };
 
         document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
 
         // Initialize socket connection with proper configuration
         const io = typeof window !== 'undefined' ? window.io : null;
@@ -290,6 +287,7 @@ function App() {
         }
 
         return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
             if (socketRef.current) {
                 console.log('🔌 Disconnecting socket');
                 socketRef.current.disconnect();
