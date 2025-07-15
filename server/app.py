@@ -995,7 +995,82 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                 'businessDetails': business_details
             }, room=session_id)  # type: ignore
             
-            # Scrape reviews for this URL
+            # Load the actual business URL
+            driver.get(url)
+            time.sleep(3)
+
+            # Click Reviews tab - same logic as scrape_and_analyze
+            try:
+                review_selectors = [
+                    "//button[contains(., 'Reviews') or contains(., 'review')]",
+                    "//div[contains(., 'Reviews') or contains(., 'review')]//parent::button",
+                    "//span[contains(., 'Reviews')]//ancestor::button",
+                    "//*[contains(@data-value, 'Reviews')]",
+                    "//button[@data-tab-index='1']"
+                ]
+                review_button = None
+                for selector in review_selectors:
+                    try:
+                        elements = driver.find_elements(By.XPATH, selector)
+                        if elements:
+                            review_button = elements[0]
+                            break
+                    except:
+                        continue
+                if review_button:
+                    driver.execute_script("arguments[0].click();", review_button)
+                    print("[🖱️ CLICK] Reviews tab clicked.")
+                    time.sleep(4)
+                else:
+                    print("[❌ ERROR] Reviews tab not found")
+                    continue
+            except Exception as e:
+                print(f"[❌ ERROR] Could not click Reviews tab: {e}")
+                continue
+
+            # Sort by newest - same logic as scrape_and_analyze
+            try:
+                sort_selectors = [
+                    "//button[.//span[contains(text(), 'Sort')]]",
+                    "//button[contains(text(), 'Sort')]",
+                    "//div[contains(text(), 'Sort')]//parent::button",
+                    "//*[contains(text(), 'Sort')]",
+                    "//button[@data-value='Sort']"
+                ]
+                sort_button = None
+                for selector in sort_selectors:
+                    try:
+                        sort_button = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, selector)))
+                        break
+                    except:
+                        continue
+                if sort_button:
+                    driver.execute_script("arguments[0].click();", sort_button)
+                    print("[🖱️ CLICK] Sort button clicked.")
+                    time.sleep(2)
+                    # Select Newest option
+                    newest_selectors = [
+                        "//li[contains(text(), 'Newest')]",
+                        "//span[contains(text(), 'Newest')]",
+                        "//div[contains(text(), 'Newest')]",
+                        "//*[contains(text(), 'Recent')]",
+                        "//div[@role='menuitem'][contains(., 'Newest')]"
+                    ]
+                    for selector in newest_selectors:
+                        try:
+                            newest_option = WebDriverWait(driver, 3).until(
+                                EC.element_to_be_clickable((By.XPATH, selector)))
+                            driver.execute_script("arguments[0].click();", newest_option)
+                            print("[↕️ SORT] Clicked on 'Newest'")
+                            time.sleep(3)
+                            break
+                        except:
+                            continue
+            except Exception as e:
+                print(f"[⚠️ WARN] Could not set sort order: {e}")
+
+            # Scroll and collect reviews
             reviews = []
             processed_review_ids = set()
             scroll_count = 0
@@ -1003,12 +1078,6 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
             stale_scrolls = 0
             max_stale_scrolls = 3
             
-            # Navigate to reviews
-            reviews_url = url.replace('/maps/place/', '/maps/place/') + '/reviews'
-            driver.get(reviews_url)
-            time.sleep(3)
-            
-            # Scroll and collect reviews
             while scroll_count < max_scrolls and stale_scrolls < max_stale_scrolls:
                 review_blocks = driver.find_elements(By.CSS_SELECTOR, '[data-review-id]')
                 new_reviews_found = False
