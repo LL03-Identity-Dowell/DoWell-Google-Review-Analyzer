@@ -129,9 +129,19 @@ function App() {
                     rejectUnauthorized: false
                 });
                 console.log('Socket initialized:', socketRef.current);
+                // Log the socket object after connect
+                console.log('Socket object after connect:', socketRef.current);
             } catch (e) {
                 console.error('Socket initialization error:', e);
             }
+
+            // Add global error handlers
+            window.addEventListener('error', function(e) {
+                console.error('Global error:', e);
+            });
+            window.addEventListener('unhandledrejection', function(e) {
+                console.error('Unhandled promise rejection:', e);
+            });
 
             socketRef.current.on('connect', () => {
                 console.log('✅ Socket connected with ID:', socketRef.current.id);
