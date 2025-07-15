@@ -589,11 +589,13 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
         # Find scrollable container - try multiple selectors
         scrollable = None
         scrollable_selectors = [
+            'div.m6QErb.DxyBCb.kA9KIf.dS8AEf',  # full-height scrollable review container
             'div.m6QErb.XiKgde',
             'div[role="main"]',
             'div.section-scrollbox',
             'div.section-layout'
         ]
+
 
         for selector in scrollable_selectors:
             try:
@@ -896,22 +898,28 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                     f"[🛑 STOP] Stopping due to {max_stale_scrolls} consecutive scrolls without new reviews")
                 break
 
+            # try:
+            #     scrollable = driver.find_element(
+            #         By.CSS_SELECTOR, "div.m6QErb.DxyBCb.kA9KIf.dS8AEf")
+            #     driver.execute_script(
+            #         "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable)
+            #     print(
+            #         f"[↕️ SCROLL {scroll_count}] Scrolled review container to bottom")
+            # except Exception as e:
+            #     print(f"[⚠️ SCROLL] Failed to scroll review container: {e}")
             try:
-                scrollable = driver.find_element(
-                    By.CSS_SELECTOR, "div.m6QErb.DxyBCb.kA9KIf.dS8AEf")
-                driver.execute_script(
-                    "arguments[0].scrollTop = arguments[0].scrollHeight", scrollable)
-                print(
-                    f"[↕️ SCROLL {scroll_count}] Scrolled review container to bottom")
-            except Exception as e:
-                print(f"[⚠️ SCROLL] Failed to scroll review container: {e}")
+                scrollable = driver.find_element(By.CSS_SELECTOR, "div.m6QErb.DxyBCb.kA9KIf.dS8AEf")
+            except:
+                scrollable = driver.find_element(By.TAG_NAME, "body")
+
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable)
+            print(f"[↕️ SCROLL {scroll_count}] Scrolled review container to bottom")
 
             # ⏱ Wait a bit to let reviews load
             time.sleep(random.uniform(2.5, 4.5))
 
             try:
-                more_buttons = driver.find_elements(
-                    By.CSS_SELECTOR, 'button[jsaction="pane.review.expandReview"]')
+                more_buttons = driver.find_elements(By.XPATH, '//button[contains(@aria-label, "more") or contains(text(), "More")]')
                 for btn in more_buttons:
                     driver.execute_script("arguments[0].click();", btn)
                     time.sleep(0.2)
