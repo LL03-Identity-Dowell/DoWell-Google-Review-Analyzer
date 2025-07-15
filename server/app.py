@@ -75,6 +75,11 @@ def health_check():
         'version': '1.0.0'
     }), 200
 
+# Add /api/health for compatibility
+@app.route('/api/health', methods=['GET'])
+def api_health_check():
+    return health_check()
+
 @app.route('/api/scrape', methods=['POST'])
 def start_scraping():
     data = request.get_json()
