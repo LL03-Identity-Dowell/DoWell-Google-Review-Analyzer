@@ -18,8 +18,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium import webdriver
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room, request  # type: ignore
-from flask import Flask, jsonify, send_file
+from flask_socketio import SocketIO, emit, join_room
+from flask import Flask, jsonify, send_file, request
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -142,12 +142,12 @@ def on_join(data):
 
 @socketio.on('connect')
 def on_connect():
-    print(f"[🔌 CONNECT] Client connected: {request.sid}")
+    print(f"[🔌 CONNECT] Client connected: {request.sid}")  # type: ignore
 
 
 @socketio.on('disconnect')
 def on_disconnect():
-    print(f"[🔌 DISCONNECT] Client disconnected: {request.sid}")
+    print(f"[🔌 DISCONNECT] Client disconnected: {request.sid}")  # type: ignore
 
 
 @socketio.on('cancel_scraping')
