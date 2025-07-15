@@ -96,6 +96,9 @@ function App() {
         setSessionId(id);
         console.log('Generated session ID:', id);
 
+        // Debug: Check if window.io and backendUrl are available
+        console.log('About to initialize socket:', typeof window !== 'undefined' ? window.io : null, backendUrl);
+
         // Close download dropdown when clicking outside
         const handleClickOutside = (event) => {
             if (showDownloadDropdown && !event.target.closest('.download-dropdown')) {
@@ -111,19 +114,24 @@ function App() {
         // Initialize socket connection with proper configuration
         const io = typeof window !== 'undefined' ? window.io : null;
         if (io) {
-            socketRef.current = io(backendUrl, {
-                path: '/socket.io/',
-                transports: ['websocket', 'polling'],
-                timeout: 20000,
-                reconnection: true,
-                reconnectionAttempts: 5,
-                reconnectionDelay: 1000,
-                reconnectionDelayMax: 5000,
-                maxReconnectionAttempts: 5,
-                forceNew: true,
-                secure: window.location.protocol === 'https:',
-                rejectUnauthorized: false
-            });
+            try {
+                socketRef.current = io(backendUrl, {
+                    path: '/socket.io/',
+                    transports: ['websocket', 'polling'],
+                    timeout: 20000,
+                    reconnection: true,
+                    reconnectionAttempts: 5,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000,
+                    maxReconnectionAttempts: 5,
+                    forceNew: true,
+                    secure: window.location.protocol === 'https:',
+                    rejectUnauthorized: false
+                });
+                console.log('Socket initialized:', socketRef.current);
+            } catch (e) {
+                console.error('Socket initialization error:', e);
+            }
 
             socketRef.current.on('connect', () => {
                 console.log('✅ Socket connected with ID:', socketRef.current.id);

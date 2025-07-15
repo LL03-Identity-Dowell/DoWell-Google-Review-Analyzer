@@ -9,7 +9,7 @@ import random
 import hashlib
 import os
 import re
-from io import StringIO
+from io import StringIO, BytesIO
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -18,8 +18,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium import webdriver
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room
-from flask import Flask, request, jsonify, send_file
+from flask_socketio import SocketIO, emit, join_room, request  # type: ignore
+from flask import Flask, jsonify, send_file
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -129,7 +129,7 @@ def on_join(data):
     print(f"[🏠 JOIN] Client joined session: {session_id}")
 
     # Send immediate confirmation
-    emit('session_joined', {'sessionId': session_id}, room=session_id)
+    socketio.emit('session_joined', {'sessionId': session_id}, room=session_id)  # type: ignore
 
     # If there are existing reviews, send them
     if session_id in SESSIONS:
@@ -137,7 +137,7 @@ def on_join(data):
         if existing_reviews:
             print(
                 f"[📤 RESEND] Sending {len(existing_reviews)} existing reviews")
-            emit('review', existing_reviews, room=session_id)
+            socketio.emit('review', existing_reviews, room=session_id)  # type: ignore
 
 
 @socketio.on('connect')
@@ -155,8 +155,8 @@ def cancel_job(data):
     session_id = data.get('sessionId')
     if session_id:
         ACTIVE_JOBS[session_id] = False
-        emit('status_update', {'progress': 0,
-             'status': 'Scraping cancelled.'}, room=session_id)
+        socketio.emit('status_update', {'progress': 0,
+             'status': 'Scraping cancelled.'}, room=session_id)  # type: ignore
 
 
 def parse_relative_date(text):
@@ -473,12 +473,12 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
 
     try:
         socketio.emit('status_update', {
-                      'progress': 5, 'status': 'Loading Google Maps page...'}, room=session_id)
+                      'progress': 5, 'status': 'Loading Google Maps page...'}, room=session_id)  # type: ignore
         driver.get(url)
         time.sleep(3)
 
         socketio.emit('status_update', {
-                      'progress': 8, 'status': 'Extracting business information...'}, room=session_id)
+                      'progress': 8, 'status': 'Extracting business information...'}, room=session_id)  # type: ignore
         
         business_details = extract_business_details(driver)
         
@@ -486,7 +486,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
         socketio.emit('business_details', {
             'url': url,
             'businessDetails': business_details
-        }, room=session_id)
+        }, room=session_id)  # type: ignore
 
         if custom_date:
             cutoff_date = datetime.datetime.strptime(custom_date, "%Y-%m-%d")
@@ -494,7 +494,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
             cutoff_date = datetime.datetime.now() - datetime.timedelta(days=int(days))
 
         socketio.emit('status_update', {
-                      'progress': 10, 'status': 'Finding Reviews tab...'}, room=session_id)
+                      'progress': 10, 'status': 'Finding Reviews tab...'}, room=session_id)  # type: ignore
 
         # Click Reviews tab - try multiple selectors
         try:
@@ -525,12 +525,12 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
 
         except Exception as e:
             socketio.emit('status_update', {
-                          'progress': 0, 'status': 'Could not find Reviews tab', 'error': True}, room=session_id)
+                          'progress': 0, 'status': 'Could not find Reviews tab', 'error': True}, room=session_id)  # type: ignore
             driver.quit()
             return
 
         socketio.emit('status_update', {
-                      'progress': 20, 'status': 'Setting up sort by newest...'}, room=session_id)
+                      'progress': 20, 'status': 'Setting up sort by newest...'}, room=session_id)  # type: ignore
 
         # Scroll to ensure elements are loaded
         driver.execute_script("window.scrollBy(0, 1000);")
@@ -584,7 +584,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
             print("[⚠️ WARN] Could not set sort order:", str(e))
 
         socketio.emit('status_update', {
-                      'progress': 30, 'status': 'Scrolling to load reviews...'}, room=session_id)
+                      'progress': 30, 'status': 'Scrolling to load reviews...'}, room=session_id)  # type: ignore
 
         # Find scrollable container - try multiple selectors
         scrollable = None
@@ -773,7 +773,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                         # Method 1: aria-label approach
                         rating_element = block.find_element(
                             By.CSS_SELECTOR, "span[class*='kvMYJc']")
-                        aria_label = rating_element.get_attribute("aria-label")
+                        aria_label = rating_element.get_attribute("aria-label") or ""
                         rating_match = re.search(
                             r'(\d+(?:\.\d+)?)', aria_label)
                         if rating_match:
@@ -784,7 +784,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                             stars = block.find_elements(
                                 By.CSS_SELECTOR, "span[style*='width']")
                             if stars:
-                                style = stars[0].get_attribute("style")
+                                style = stars[0].get_attribute("style") or ""
                                 width_match = re.search(
                                     r'width:\s*(\d+)%', style)
                                 if width_match:
@@ -815,9 +815,9 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                     try:
                         photo_elements = block.find_elements(By.CSS_SELECTOR, 'img')
                         review_photos = [
-                            img.get_attribute("src") 
-                            for img in photo_elements 
-                            if 'googleusercontent.com' in img.get_attribute("src") and 'photo.jpg' in img.get_attribute("src")
+                            src for img in photo_elements
+                            if (src := img.get_attribute("src")) and
+                               'googleusercontent.com' in src and 'photo.jpg' in src
                         ]
                     except:
                         review_photos = []
@@ -846,7 +846,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                     socketio.emit('review', {
                         'url': url,
                         'reviews': [review]
-                    }, room=session_id)
+                    }, room=session_id)  # type: ignore
                     print(
                         f"[✅ NEW] Processed review from {author} ({parsed_date.date()}) - Rating: {rating}")
 
@@ -864,7 +864,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
             socketio.emit('status_update', {
                 'progress': progress,
                 'status': f'Found {len(reviews)} reviews... (scroll {scroll_count + 1}, found {reviews_processed_this_scroll} this round)'
-            }, room=session_id)
+            }, room=session_id)  # type: ignore
 
             if new_reviews_found:
                 stale_scrolls = 0
@@ -934,15 +934,15 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
 
         if not reviews:
             socketio.emit('status_update', {
-                          'progress': 100, 'status': 'No reviews found in the specified date range'}, room=session_id)
+                          'progress': 100, 'status': 'No reviews found in the specified date range'}, room=session_id)  # type: ignore
             return
 
         socketio.emit('status_update', {
             'progress': 100,
             'status': f'Analysis complete! Found {len(reviews)} reviews.'
-        }, room=session_id)
+        }, room=session_id)  # type: ignore
 
-        print(f"[🎉 COMPLETE] Scraping finished. Total reviews: {len(reviews)}")
+        print(f"[�� COMPLETE] Scraping finished. Total reviews: {len(reviews)}")
 
     except Exception as e:
         print(f"[❌ ERROR] Scraping failed: {e}")
@@ -952,7 +952,7 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
             'progress': 0,
             'status': f'Scraping failed: {str(e)}',
             'error': True
-        }, room=session_id)
+        }, room=session_id)  # type: ignore
         if driver:
             driver.quit()
 
@@ -980,7 +980,7 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
         socketio.emit('status_update', {
             'progress': progress,
             'status': f'Processing business {i+1} of {total_urls}...'
-        }, room=session_id)
+        }, room=session_id)  # type: ignore
         
         try:
             # Initialize driver for this URL
@@ -993,7 +993,7 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
             socketio.emit('business_details', {
                 'url': url,
                 'businessDetails': business_details
-            }, room=session_id)
+            }, room=session_id)  # type: ignore
             
             # Scrape reviews for this URL
             reviews = []
@@ -1055,9 +1055,9 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                         try:
                             photo_elements = block.find_elements(By.CSS_SELECTOR, 'img')
                             review_photos = [
-                                img.get_attribute("src") 
-                                for img in photo_elements 
-                                if 'googleusercontent.com' in img.get_attribute("src") and 'photo.jpg' in img.get_attribute("src")
+                                src for img in photo_elements
+                                if (src := img.get_attribute("src")) and
+                                   'googleusercontent.com' in src and 'photo.jpg' in src
                             ]
                         except:
                             review_photos = []
@@ -1079,7 +1079,7 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                         socketio.emit('review', {
                             'url': url,
                             'reviews': [review]
-                        }, room=session_id)
+                        }, room=session_id)  # type: ignore
                         
                     except Exception as e:
                         print(f"[⚠️ EXTRACT] Error extracting review: {e}")
@@ -1131,7 +1131,7 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
     socketio.emit('status_update', {
         'progress': 100,
         'status': f'Bulk analysis complete! Processed {completed_urls} businesses.'
-    }, room=session_id)
+    }, room=session_id)  # type: ignore
     
     print(f"[🎉 BULK COMPLETE] Bulk scraping finished. Processed {completed_urls}/{total_urls} URLs")
 
@@ -1152,8 +1152,11 @@ def download_csv(session_id):
         writer.writeheader()
         writer.writerows(reviews)
         si.seek(0)
+        mem = BytesIO()
+        mem.write(si.getvalue().encode('utf-8'))
+        mem.seek(0)
         return send_file(
-            StringIO(si.read()),
+            mem,
             mimetype='text/csv',
             as_attachment=True,
             download_name=f'reviews_{session_id}.csv'
@@ -1292,8 +1295,11 @@ def generate_bulk_csv(results, session_id):
             ])
     
     si.seek(0)
+    mem = BytesIO()
+    mem.write(si.getvalue().encode('utf-8'))
+    mem.seek(0)
     return send_file(
-        StringIO(si.read()),
+        mem,
         mimetype='text/csv',
         as_attachment=True,
         download_name=f'google_reviews_analysis_{session_id}.csv'
