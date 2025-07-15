@@ -93,6 +93,30 @@ def start_scraping():
     return jsonify({'message': 'Scraping started'})
 
 
+@app.route('/api/scrape-bulk', methods=['POST'])
+def start_bulk_scraping():
+    data = request.get_json()
+    urls = data.get('urls', [])
+    days = data.get('days')
+    custom_date = data.get('customDate')
+    email = data.get('email')
+    session_id = data.get('sessionId')
+
+    if not session_id:
+        return jsonify({'error': 'Missing sessionId'}), 400
+    
+    if not urls or len(urls) == 0:
+        return jsonify({'error': 'No URLs provided'}), 400
+    
+    if len(urls) > 10000:
+        return jsonify({'error': 'Maximum 10,000 URLs allowed'}), 400
+
+    ACTIVE_JOBS[session_id] = True
+    socketio.start_background_task(
+        scrape_bulk_and_analyze, urls, days, custom_date, email, session_id)
+    return jsonify({'message': 'Bulk scraping started'})
+
+
 @socketio.on('join_session')
 def on_join(data):
     session_id = data['sessionId']
@@ -453,8 +477,11 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
         
         business_details = extract_business_details(driver)
         
-        # Emit business details to frontend
-        socketio.emit('business_details', business_details, room=session_id)
+        # Emit business details to frontend (with URL for compatibility)
+        socketio.emit('business_details', {
+            'url': url,
+            'businessDetails': business_details
+        }, room=session_id)
 
         if custom_date:
             cutoff_date = datetime.datetime.strptime(custom_date, "%Y-%m-%d")
@@ -808,10 +835,13 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                         SESSIONS[session_id] = []
                     SESSIONS[session_id].append(review)
 
-                    # Emit individual review to frontend
+                    # Emit individual review to frontend (with URL for compatibility)
                     print(
                         f"[🔄 EMIT] Emitting review to session {session_id}: {review['author']}")
-                    socketio.emit('review', [review], to=session_id)
+                    socketio.emit('review', {
+                        'url': url,
+                        'reviews': [review]
+                    }, room=session_id)
                     print(
                         f"[✅ NEW] Processed review from {author} ({parsed_date.date()}) - Rating: {rating}")
 
@@ -885,9 +915,15 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
 
             scroll_count += 1
 
-        # Store reviews in session for CSV download
-        SESSIONS[session_id] = reviews
-        SESSIONS[f"{session_id}_business"] = business_details
+        # Store results in session for compatibility with new format
+        SESSIONS[session_id] = {
+            url: {
+                'businessDetails': business_details,
+                'reviews': reviews,
+                'sentiment': '',
+                'swot': {}
+            }
+        }
 
         driver.quit()
 
@@ -916,53 +952,542 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
             driver.quit()
 
 
+def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
+    """Scrape and analyze multiple URLs"""
+    print(f"[🚀 BULK] Starting bulk scraping for {len(urls)} URLs")
+    
+    # Initialize results storage
+    if session_id not in SESSIONS:
+        SESSIONS[session_id] = {}
+    
+    total_urls = len(urls)
+    completed_urls = 0
+    
+    for i, url in enumerate(urls):
+        if not ACTIVE_JOBS.get(session_id, True):
+            print(f"[🛑 CANCELLED] Bulk scraping cancelled by user")
+            break
+            
+        print(f"[📊 PROGRESS] Processing URL {i+1}/{total_urls}: {url}")
+        
+        # Update progress
+        progress = (i / total_urls) * 100
+        socketio.emit('status_update', {
+            'progress': progress,
+            'status': f'Processing business {i+1} of {total_urls}...'
+        }, room=session_id)
+        
+        try:
+            # Initialize driver for this URL
+            driver = init_driver()
+            
+            # Extract business details
+            business_details = extract_business_details(driver)
+            
+            # Emit business details
+            socketio.emit('business_details', {
+                'url': url,
+                'businessDetails': business_details
+            }, room=session_id)
+            
+            # Scrape reviews for this URL
+            reviews = []
+            processed_review_ids = set()
+            scroll_count = 0
+            max_scrolls = 20
+            stale_scrolls = 0
+            max_stale_scrolls = 3
+            
+            # Navigate to reviews
+            reviews_url = url.replace('/maps/place/', '/maps/place/') + '/reviews'
+            driver.get(reviews_url)
+            time.sleep(3)
+            
+            # Scroll and collect reviews
+            while scroll_count < max_scrolls and stale_scrolls < max_stale_scrolls:
+                review_blocks = driver.find_elements(By.CSS_SELECTOR, '[data-review-id]')
+                new_reviews_found = False
+                reviews_processed_this_scroll = 0
+                
+                for block in review_blocks:
+                    try:
+                        review_id = block.get_attribute('data-review-id')
+                        if review_id in processed_review_ids:
+                            continue
+                            
+                        # Extract review data
+                        author = block.find_element(By.CSS_SELECTOR, '.d4r55').text.strip()
+                        rating_element = block.find_element(By.CSS_SELECTOR, '.kvMYJc')
+                        rating = len(rating_element.find_elements(By.CSS_SELECTOR, '.QqG1Sd'))
+                        
+                        # Parse date
+                        date_text = block.find_element(By.CSS_SELECTOR, '.rsqaWe').text.strip()
+                        parsed_date = parse_relative_date(date_text)
+                        
+                        # Check date filter
+                        if days != 'custom':
+                            days_int = int(days)
+                            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_int)
+                            if parsed_date < cutoff_date:
+                                continue
+                        elif custom_date:
+                            cutoff_date = datetime.datetime.strptime(custom_date, '%Y-%m-%d')
+                            if parsed_date < cutoff_date:
+                                continue
+                        
+                        # Extract review text
+                        text = ''
+                        text_selectors = [".wiI7pd", "span[jsaction*='expand']", ".review-text"]
+                        for text_selector in text_selectors:
+                            try:
+                                text_element = block.find_element(By.CSS_SELECTOR, text_selector)
+                                text = text_element.text.strip()
+                                break
+                            except:
+                                continue
+                        
+                        # Extract photos
+                        try:
+                            photo_elements = block.find_elements(By.CSS_SELECTOR, 'img')
+                            review_photos = [
+                                img.get_attribute("src") 
+                                for img in photo_elements 
+                                if 'googleusercontent.com' in img.get_attribute("src") and 'photo.jpg' in img.get_attribute("src")
+                            ]
+                        except:
+                            review_photos = []
+                        
+                        review = {
+                            "author": author,
+                            "rating": rating,
+                            "date": parsed_date.strftime("%Y-%m-%d"),
+                            "text": text,
+                            "photo": review_photos
+                        }
+                        
+                        reviews.append(review)
+                        processed_review_ids.add(review_id)
+                        new_reviews_found = True
+                        reviews_processed_this_scroll += 1
+                        
+                        # Emit individual review
+                        socketio.emit('review', {
+                            'url': url,
+                            'reviews': [review]
+                        }, room=session_id)
+                        
+                    except Exception as e:
+                        print(f"[⚠️ EXTRACT] Error extracting review: {e}")
+                        continue
+                
+                # Update progress
+                if new_reviews_found:
+                    stale_scrolls = 0
+                else:
+                    stale_scrolls += 1
+                
+                # Scroll for more reviews
+                try:
+                    scrollable = driver.find_element(By.CSS_SELECTOR, "div.m6QErb.DxyBCb.kA9KIf.dS8AEf")
+                    driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable)
+                    time.sleep(random.uniform(2.5, 4.5))
+                except:
+                    break
+                
+                scroll_count += 1
+            
+            # Store results for this URL
+            SESSIONS[session_id][url] = {
+                'businessDetails': business_details,
+                'reviews': reviews,
+                'sentiment': '',
+                'swot': {}
+            }
+            
+            completed_urls += 1
+            print(f"[✅ COMPLETE] URL {i+1}/{total_urls} completed: {len(reviews)} reviews")
+            
+            driver.quit()
+            
+        except Exception as e:
+            print(f"[❌ ERROR] Failed to process URL {url}: {e}")
+            # Store empty results for failed URL
+            SESSIONS[session_id][url] = {
+                'businessDetails': {},
+                'reviews': [],
+                'sentiment': '',
+                'swot': {}
+            }
+            completed_urls += 1
+            if driver:
+                driver.quit()
+    
+    # Final progress update
+    socketio.emit('status_update', {
+        'progress': 100,
+        'status': f'Bulk analysis complete! Processed {completed_urls} businesses.'
+    }, room=session_id)
+    
+    print(f"[🎉 BULK COMPLETE] Bulk scraping finished. Processed {completed_urls}/{total_urls} URLs")
+
+
 @app.route('/api/download-csv/<session_id>', methods=['GET'])
 def download_csv(session_id):
-    reviews = SESSIONS.get(session_id, [])
-    if not reviews:
+    results = SESSIONS.get(session_id, {})
+    if not results:
         return jsonify({'error': 'No data'}), 404
 
-    si = StringIO()
-    writer = csv.DictWriter(
-        si, fieldnames=['date', 'author', 'rating', 'text', 'photo'])
-    writer.writeheader()
-    writer.writerows(reviews)
-    si.seek(0)
-
-    return send_file(
-        StringIO(si.read()),
-        mimetype='text/csv',
-        as_attachment=True,
-        download_name=f'reviews_{session_id}.csv'
-    )
+    # Handle both old and new format
+    if isinstance(results, list):
+        # Old format - single URL
+        reviews = results
+        si = StringIO()
+        writer = csv.DictWriter(
+            si, fieldnames=['date', 'author', 'rating', 'text', 'photo'])
+        writer.writeheader()
+        writer.writerows(reviews)
+        si.seek(0)
+        return send_file(
+            StringIO(si.read()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'reviews_{session_id}.csv'
+        )
+    else:
+        # New format - multiple URLs
+        return generate_bulk_csv(results, session_id)
 
 @app.route('/api/download-pdf/<session_id>', methods=['GET'])
 def download_pdf(session_id):
-    reviews = SESSIONS.get(session_id, [])
-    business_details = SESSIONS.get(f"{session_id}_business", {})
+    results = SESSIONS.get(session_id, {})
     
-    if not reviews:
+    if not results:
         return jsonify({'error': 'No data'}), 404
     
     try:
-        filepath = generate_pdf_report(business_details, reviews, session_id)
-        return send_file(filepath, as_attachment=True, download_name=f'business_report_{session_id}.pdf')
+        # Handle both old and new format
+        if isinstance(results, list):
+            # Old format - single URL
+            reviews = results
+            business_details = SESSIONS.get(f"{session_id}_business", {})
+            filepath = generate_pdf_report(business_details, reviews, session_id)
+            return send_file(filepath, as_attachment=True, download_name=f'business_report_{session_id}.pdf')
+        else:
+            # New format - multiple URLs
+            return generate_bulk_pdf(results, session_id)
     except Exception as e:
         return jsonify({'error': f'Failed to generate PDF: {str(e)}'}), 500
 
 @app.route('/api/download-txt/<session_id>', methods=['GET'])
 def download_txt(session_id):
-    reviews = SESSIONS.get(session_id, [])
-    business_details = SESSIONS.get(f"{session_id}_business", {})
+    results = SESSIONS.get(session_id, {})
     
-    if not reviews:
+    if not results:
         return jsonify({'error': 'No data'}), 404
     
     try:
-        filepath = generate_txt_report(business_details, reviews, session_id)
-        return send_file(filepath, as_attachment=True, download_name=f'business_report_{session_id}.txt')
+        # Handle both old and new format
+        if isinstance(results, list):
+            # Old format - single URL
+            reviews = results
+            business_details = SESSIONS.get(f"{session_id}_business", {})
+            filepath = generate_txt_report(business_details, reviews, session_id)
+            return send_file(filepath, as_attachment=True, download_name=f'business_report_{session_id}.txt')
+        else:
+            # New format - multiple URLs
+            return generate_bulk_txt(results, session_id)
     except Exception as e:
         return jsonify({'error': f'Failed to generate TXT: {str(e)}'}), 500
+
+
+@app.route('/api/download-bulk/<session_id>', methods=['POST'])
+def download_bulk_results(session_id):
+    data = request.get_json()
+    results = data.get('results', {})
+    format_type = data.get('format', 'csv').lower()
+    email = data.get('email', '')
+    
+    if not results:
+        return jsonify({'error': 'No results data'}), 404
+    
+    try:
+        if format_type == 'csv':
+            return generate_bulk_csv(results, session_id)
+        elif format_type == 'pdf':
+            return generate_bulk_pdf(results, session_id)
+        elif format_type == 'txt':
+            return generate_bulk_txt(results, session_id)
+        else:
+            return jsonify({'error': 'Invalid format. Use csv, pdf, or txt'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Failed to generate {format_type.upper()}: {str(e)}'}), 500
+
+
+@app.route('/api/send-email', methods=['POST'])
+def send_email_results():
+    data = request.get_json()
+    results = data.get('results', {})
+    email = data.get('email', '')
+    session_id = data.get('sessionId', '')
+    
+    if not results:
+        return jsonify({'error': 'No results data'}), 404
+    
+    if not email:
+        return jsonify({'error': 'Email address required'}), 400
+    
+    try:
+        # Generate email content
+        email_content = generate_email_content(results, session_id)
+        
+        # Here you would integrate with your email service
+        # For now, we'll just return success
+        # You can integrate with services like SendGrid, AWS SES, etc.
+        
+        print(f"[📧 EMAIL] Would send email to {email} with {len(results)} business results")
+        
+        return jsonify({
+            'message': 'Email sent successfully',
+            'recipient': email,
+            'businesses': len(results)
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to send email: {str(e)}'}), 500
+
+
+def generate_bulk_csv(results, session_id):
+    """Generate CSV file with all business results"""
+    si = StringIO()
+    writer = csv.writer(si)
+    
+    # Write header
+    writer.writerow(['Business Name', 'Address', 'Phone', 'Website', 'Category', 'Rating', 'Total Reviews', 'Hours', 'Review Date', 'Review Author', 'Review Rating', 'Review Text'])
+    
+    for url, url_results in results.items():
+        business_details = url_results.get('businessDetails', {})
+        reviews = url_results.get('reviews', [])
+        
+        if not business_details.get('name'):
+            continue
+            
+        for review in reviews:
+            writer.writerow([
+                business_details.get('name', ''),
+                business_details.get('address', ''),
+                business_details.get('phone', ''),
+                business_details.get('website', ''),
+                business_details.get('category', ''),
+                business_details.get('rating', ''),
+                business_details.get('total_reviews', ''),
+                business_details.get('hours', ''),
+                review.get('date', ''),
+                review.get('author', ''),
+                review.get('rating', ''),
+                review.get('text', '')
+            ])
+    
+    si.seek(0)
+    return send_file(
+        StringIO(si.read()),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=f'google_reviews_analysis_{session_id}.csv'
+    )
+
+
+def generate_bulk_pdf(results, session_id):
+    """Generate PDF file with all business results"""
+    filepath = f"/tmp/bulk_report_{session_id}.pdf"
+    doc = SimpleDocTemplate(filepath, pagesize=letter)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    for i, (url, url_results) in enumerate(results.items(), 1):
+        business_details = url_results.get('businessDetails', {})
+        reviews = url_results.get('reviews', [])
+        
+        if not business_details.get('name'):
+            continue
+            
+        # Business section
+        story.append(Paragraph(f"Business {i}: {business_details.get('name', 'Unknown')}", title_style))
+        story.append(Spacer(1, 12))
+        
+        # Business details
+        details = []
+        if business_details.get('address'):
+            details.append(f"Address: {business_details['address']}")
+        if business_details.get('phone'):
+            details.append(f"Phone: {business_details['phone']}")
+        if business_details.get('website'):
+            details.append(f"Website: {business_details['website']}")
+        if business_details.get('rating'):
+            details.append(f"Rating: {business_details['rating']}")
+        if business_details.get('total_reviews'):
+            details.append(f"Total Reviews: {business_details['total_reviews']}")
+        
+        for detail in details:
+            story.append(Paragraph(detail, styles['Normal']))
+            story.append(Spacer(1, 6))
+        
+        story.append(Spacer(1, 12))
+        
+        # Reviews table
+        if reviews:
+            story.append(Paragraph("Reviews:", styles['Heading2']))
+            story.append(Spacer(1, 12))
+            
+            table_data = [['Date', 'Author', 'Rating', 'Review']]
+            for review in reviews[:50]:  # Limit to first 50 reviews per business
+                table_data.append([
+                    review.get('date', ''),
+                    review.get('author', ''),
+                    f"{review.get('rating', '')}⭐",
+                    textwrap.shorten(review.get('text', ''), width=100)
+                ])
+            
+            table = Table(table_data, colWidths=[1*inch, 1.5*inch, 0.5*inch, 3*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(table)
+        
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("=" * 50, styles['Normal']))
+        story.append(Spacer(1, 20))
+    
+    doc.build(story)
+    return send_file(filepath, as_attachment=True, download_name=f'google_reviews_analysis_{session_id}.pdf')
+
+
+def generate_bulk_txt(results, session_id):
+    """Generate TXT file with all business results"""
+    filepath = f"/tmp/bulk_report_{session_id}.txt"
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write("GOOGLE REVIEWS ANALYSIS REPORT\n")
+        f.write("=" * 50 + "\n\n")
+        
+        for i, (url, url_results) in enumerate(results.items(), 1):
+            business_details = url_results.get('businessDetails', {})
+            reviews = url_results.get('reviews', [])
+            
+            if not business_details.get('name'):
+                continue
+                
+            # Business section
+            f.write(f"BUSINESS {i}: {business_details.get('name', 'Unknown')}\n")
+            f.write("-" * 40 + "\n")
+            
+            # Business details
+            if business_details.get('address'):
+                f.write(f"Address: {business_details['address']}\n")
+            if business_details.get('phone'):
+                f.write(f"Phone: {business_details['phone']}\n")
+            if business_details.get('website'):
+                f.write(f"Website: {business_details['website']}\n")
+            if business_details.get('rating'):
+                f.write(f"Rating: {business_details['rating']}\n")
+            if business_details.get('total_reviews'):
+                f.write(f"Total Reviews: {business_details['total_reviews']}\n")
+            
+            f.write("\n")
+            
+            # Reviews
+            if reviews:
+                f.write("REVIEWS:\n")
+                f.write("-" * 20 + "\n")
+                for j, review in enumerate(reviews[:50], 1):  # Limit to first 50 reviews
+                    f.write(f"{j}. {review.get('date', '')} - {review.get('author', '')} ({review.get('rating', '')}⭐)\n")
+                    f.write(f"   {review.get('text', '')}\n\n")
+            
+            f.write("\n" + "=" * 50 + "\n\n")
+    
+    return send_file(filepath, as_attachment=True, download_name=f'google_reviews_analysis_{session_id}.txt')
+
+
+def generate_email_content(results, session_id):
+    """Generate email content for all business results"""
+    content = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+            .business {{ margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }}
+            .business h2 {{ color: #2563eb; margin-top: 0; }}
+            .details {{ margin: 10px 0; }}
+            .reviews {{ margin-top: 15px; }}
+            .review {{ margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 4px; }}
+            .rating {{ color: #f59e0b; font-weight: bold; }}
+        </style>
+    </head>
+    <body>
+        <h1>Google Reviews Analysis Report</h1>
+        <p>Session ID: {session_id}</p>
+        <p>Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    """
+    
+    for i, (url, url_results) in enumerate(results.items(), 1):
+        business_details = url_results.get('businessDetails', {})
+        reviews = url_results.get('reviews', [])
+        
+        if not business_details.get('name'):
+            continue
+            
+        content += f"""
+        <div class="business">
+            <h2>Business {i}: {business_details.get('name', 'Unknown')}</h2>
+            <div class="details">
+        """
+        
+        if business_details.get('address'):
+            content += f"<p><strong>Address:</strong> {business_details['address']}</p>"
+        if business_details.get('phone'):
+            content += f"<p><strong>Phone:</strong> {business_details['phone']}</p>"
+        if business_details.get('website'):
+            content += f"<p><strong>Website:</strong> <a href='{business_details['website']}'>{business_details['website']}</a></p>"
+        if business_details.get('rating'):
+            content += f"<p><strong>Rating:</strong> {business_details['rating']}⭐</p>"
+        if business_details.get('total_reviews'):
+            content += f"<p><strong>Total Reviews:</strong> {business_details['total_reviews']}</p>"
+        
+        content += "</div>"
+        
+        if reviews:
+            content += "<div class='reviews'><h3>Reviews:</h3>"
+            for review in reviews[:20]:  # Limit to first 20 reviews
+                content += f"""
+                <div class="review">
+                    <p><strong>{review.get('date', '')} - {review.get('author', '')}</strong> 
+                    <span class="rating">{review.get('rating', '')}⭐</span></p>
+                    <p>{review.get('text', '')}</p>
+                </div>
+                """
+            content += "</div>"
+        
+        content += "</div>"
+    
+    content += """
+    </body>
+    </html>
+    """
+    
+    return content
 
 
 if __name__ == '__main__':

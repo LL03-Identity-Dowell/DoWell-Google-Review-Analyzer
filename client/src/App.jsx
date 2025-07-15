@@ -30,7 +30,10 @@ import {
     ExternalLink,
     Clock,
     FileText,
-    FileDown
+    FileDown,
+    ChevronDown,
+    FileSpreadsheet,
+    Send
 } from 'lucide-react';
 
 
@@ -67,26 +70,43 @@ const slideInVariants = {
 };
 
 function App() {
-    const [url, setUrl] = useState('');
+    const [csvFile, setCsvFile] = useState(null);
+    const [urls, setUrls] = useState([]);
     const [days, setDays] = useState('7');
     const [customDate, setCustomDate] = useState('');
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [progress, setProgress] = useState(0);
-    const [reviews, setReviews] = useState([]);
+    const [activeTab, setActiveTab] = useState(0);
+    const [results, setResults] = useState({}); // Store results for each URL
     const [sentiment, setSentiment] = useState('');
     const [swot, setSwot] = useState({ strengths: [], weaknesses: [], opportunities: [], threats: [] });
     const [sessionId, setSessionId] = useState('');
     const [error, setError] = useState('');
+    const [csvError, setCsvError] = useState('');
     const socketRef = useRef(null);
     const [connectionStatus, setConnectionStatus] = useState('connecting');
     const [businessDetails, setBusinessDetails] = useState({});
+    const [showDownloadDropdown, setShowDownloadDropdown] = useState(false);
+    const [sendingEmail, setSendingEmail] = useState(false);
 
     useEffect(() => {
         const id = Math.random().toString(36).substr(2, 9);
         setSessionId(id);
         console.log('Generated session ID:', id);
+
+        // Close download dropdown when clicking outside
+        const handleClickOutside = (event) => {
+            if (showDownloadDropdown && !event.target.closest('.download-dropdown')) {
+                setShowDownloadDropdown(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
 
         // Initialize socket connection with proper configuration
         const io = typeof window !== 'undefined' ? window.io : null;
@@ -162,10 +182,12 @@ function App() {
                 }
             });
 
-            // Improved review handling
-            socketRef.current.on('review', (newReviews) => {
-                console.log('📝 Received reviews:', newReviews);
-
+            // Improved review handling for multiple URLs
+            socketRef.current.on('review', (data) => {
+                console.log('📝 Received reviews:', data);
+                
+                const { url, reviews: newReviews } = data;
+                
                 if (!Array.isArray(newReviews)) {
                     console.warn('⚠️ Received non-array reviews:', newReviews);
                     return;
@@ -176,12 +198,12 @@ function App() {
                     return;
                 }
 
-                setReviews((prevReviews) => {
-                    const prevCount = prevReviews.length;
-
+                setResults(prevResults => {
+                    const currentUrlResults = prevResults[url] || { reviews: [], businessDetails: {}, sentiment: '', swot: {} };
+                    
                     // Create a Set of existing review identifiers to avoid duplicates
                     const existingReviewIds = new Set(
-                        prevReviews.map(r => `${r.author}_${r.date}_${r.rating}`)
+                        currentUrlResults.reviews.map(r => `${r.author}_${r.date}_${r.rating}`)
                     );
 
                     // Filter out duplicates
@@ -190,26 +212,53 @@ function App() {
                         return !existingReviewIds.has(reviewId);
                     });
 
-                    const updatedReviews = [...prevReviews, ...uniqueNewReviews];
-                    console.log(`📈 Reviews updated: ${prevCount} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
+                    const updatedReviews = [...currentUrlResults.reviews, ...uniqueNewReviews];
+                    console.log(`📈 Reviews updated for ${url}: ${currentUrlResults.reviews.length} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
 
-                    return updatedReviews;
+                    return {
+                        ...prevResults,
+                        [url]: {
+                            ...currentUrlResults,
+                            reviews: updatedReviews
+                        }
+                    };
                 });
             });
 
             socketRef.current.on('sentiment_update', (data) => {
                 console.log('💭 Sentiment update:', data);
-                setSentiment(data.text);
+                const { url, sentiment: sentimentText } = data;
+                setResults(prevResults => ({
+                    ...prevResults,
+                    [url]: {
+                        ...prevResults[url],
+                        sentiment: sentimentText
+                    }
+                }));
             });
 
             socketRef.current.on('swot_update', (data) => {
                 console.log('📊 SWOT update:', data);
-                setSwot((prev) => ({ ...prev, ...data }));
+                const { url, swot: swotData } = data;
+                setResults(prevResults => ({
+                    ...prevResults,
+                    [url]: {
+                        ...prevResults[url],
+                        swot: { ...prevResults[url]?.swot, ...swotData }
+                    }
+                }));
             });
 
             socketRef.current.on('business_details', (data) => {
                 console.log('🏢 Business details received:', data);
-                setBusinessDetails(data);
+                const { url, businessDetails: details } = data;
+                setResults(prevResults => ({
+                    ...prevResults,
+                    [url]: {
+                        ...prevResults[url],
+                        businessDetails: details
+                    }
+                }));
             });
 
             // Debug: log all socket events
@@ -230,10 +279,61 @@ function App() {
         };
     }, []);
 
+    const handleCsvFileChange = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Check file type
+        if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+            setCsvError('Please select a valid CSV file');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const csvText = e.target.result;
+                const lines = csvText.split('\n');
+                const urls = [];
+                
+                // Skip header row and process each line
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (line) {
+                        const columns = line.split(',');
+                        const url = columns[0]?.trim();
+                        if (url && (url.includes('google.com/maps') || url.includes('goo.gl'))) {
+                            urls.push(url);
+                        }
+                    }
+                }
+
+                if (urls.length === 0) {
+                    setCsvError('No valid Google Maps URLs found in the CSV file');
+                    return;
+                }
+
+                if (urls.length > 10000) {
+                    setCsvError('CSV file contains more than 10,000 entries. Please use a smaller file.');
+                    return;
+                }
+
+                setUrls(urls);
+                setCsvFile(file);
+                setCsvError('');
+                console.log(`📄 CSV processed: ${urls.length} URLs found`);
+            } catch (error) {
+                console.error('Error processing CSV:', error);
+                setCsvError('Error processing CSV file. Please check the file format.');
+            }
+        };
+        reader.readAsText(file);
+    };
+
     const handleSubmit = async () => {
         // Validation
-        if (!url.trim()) {
-            setError('Please enter a Google Maps URL');
+        if (!csvFile) {
+            setError('Please select a CSV file');
             return;
         }
         if (!email.trim()) {
@@ -252,30 +352,24 @@ function App() {
             return;
         }
 
-        // Validate URL format
-        if (!url.includes('google.com/maps') && !url.includes('goo.gl')) {
-            setError('Please enter a valid Google Maps URL');
-            return;
-        }
-
         setLoading(true);
         setError('');
+        setCsvError('');
         setMessage('Starting analysis...');
         setProgress(0);
-        setReviews([]);
-        setSentiment('');
-        setSwot({ strengths: [], weaknesses: [], opportunities: [], threats: [] });
+        setResults({});
+        setActiveTab(0);
 
-        console.log('Starting new analysis, reviews reset');
+        console.log('Starting new analysis for multiple URLs');
 
         try {
-            const response = await fetch(`${backendUrl}/api/scrape`, {
+            const response = await fetch(`${backendUrl}/api/scrape-bulk`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    url: url.trim(),
+                    urls: urls,
                     days,
                     customDate,
                     email: email.trim(),
@@ -306,107 +400,101 @@ function App() {
     };
 
     const handleReset = () => {
-        setUrl('');
+        setCsvFile(null);
+        setUrls([]);
         setDays('7');
         setCustomDate('');
         setEmail('');
         setLoading(false);
         setMessage('');
         setProgress(0);
-        setReviews([]);
-        setBusinessDetails({});
-        setSentiment('');
-        setSwot({ strengths: [], weaknesses: [], opportunities: [], threats: [] });
+        setResults({});
+        setActiveTab(0);
         setError('');
+        setCsvError('');
+        setShowDownloadDropdown(false);
+        setSendingEmail(false);
     };
 
-    const downloadCSV = async () => {
-        if (!reviews.length) {
-            setError('No reviews available to download');
+    const downloadAllResults = async (format) => {
+        if (Object.keys(results).length === 0) {
+            setError('No results available to download');
             return;
         }
 
         try {
-            const response = await fetch(`${backendUrl}/api/download-csv/${sessionId}`, {
-                method: 'GET',
+            const response = await fetch(`${backendUrl}/api/download-bulk/${sessionId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    results,
+                    format,
+                    email: email.trim()
+                })
             });
 
             if (!response.ok) {
-                throw new Error('Failed to download CSV');
+                throw new Error(`Failed to download ${format.toUpperCase()}`);
             }
 
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.setAttribute('download', `reviews_${sessionId}.csv`);
+            link.setAttribute('download', `google_reviews_analysis_${sessionId}.${format.toLowerCase()}`);
             document.body.appendChild(link);
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
+            
+            setShowDownloadDropdown(false);
         } catch (err) {
             console.error(err);
-            setError('Failed to download CSV file');
+            setError(`Failed to download ${format.toUpperCase()} file`);
         }
     };
 
-    const downloadPDF = async () => {
-        if (!reviews.length) {
-            setError('No reviews available to download');
+    const sendEmailResults = async () => {
+        if (Object.keys(results).length === 0) {
+            setError('No results available to send');
             return;
         }
 
-        try {
-            const response = await fetch(`${backendUrl}/api/download-pdf/${sessionId}`, {
-                method: 'GET',
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to download PDF');
-            }
-
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `business_report_${sessionId}.pdf`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
-        } catch (err) {
-            console.error(err);
-            setError('Failed to download PDF file');
-        }
-    };
-
-    const downloadTXT = async () => {
-        if (!reviews.length) {
-            setError('No reviews available to download');
+        if (!email.trim()) {
+            setError('Please enter your email address');
             return;
         }
 
+        setSendingEmail(true);
+        setError('');
+
         try {
-            const response = await fetch(`${backendUrl}/api/download-txt/${sessionId}`, {
-                method: 'GET',
+            const response = await fetch(`${backendUrl}/api/send-email`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    results,
+                    email: email.trim(),
+                    sessionId
+                })
             });
 
             if (!response.ok) {
-                throw new Error('Failed to download TXT');
+                throw new Error('Failed to send email');
             }
 
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `business_report_${sessionId}.txt`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
+            const data = await response.json();
+            console.log('Email sent successfully:', data);
+            setMessage('Results sent to your email successfully!');
         } catch (err) {
             console.error(err);
-            setError('Failed to download TXT file');
+            setError('Failed to send email. Please try again.');
+        } finally {
+            setSendingEmail(false);
         }
     };
 
@@ -416,9 +504,11 @@ function App() {
         return 'text-red-600 bg-red-50';
     };
 
-    const getStats = () => {
-        if (!reviews.length) return null;
+    const getStats = (url) => {
+        const urlResults = results[url];
+        if (!urlResults || !urlResults.reviews || !urlResults.reviews.length) return null;
 
+        const reviews = urlResults.reviews;
         const totalReviews = reviews.length;
         const averageRating = (reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1);
         const highRatings = reviews.filter(r => r.rating >= 4).length;
@@ -492,23 +582,28 @@ function App() {
                     variants={itemVariants}
                 >
                     <div className="grid gap-6">
-                        {/* URL Input */}
+                        {/* CSV File Input */}
                         <div className="space-y-2">
                             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                                <Globe className="w-4 h-4" />
-                                Google Maps URL
+                                <FileSpreadsheet className="w-4 h-4" />
+                                CSV File with Google Maps URLs
                             </label>
                             <div className="relative">
                                 <input
-                                    type="text"
-                                    placeholder="https://maps.google.com/..."
-                                    value={url}
-                                    onChange={(e) => setUrl(e.target.value)}
-                                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${error && !url.trim() ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                        }`}
+                                    type="file"
+                                    accept=".csv"
+                                    onChange={handleCsvFileChange}
+                                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${csvError ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
                                 />
-                                <Globe className="absolute right-3 top-3.5 w-5 h-5 text-gray-400" />
                             </div>
+                            {csvFile && (
+                                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl text-green-700">
+                                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                                    <span className="text-sm">
+                                        {csvFile.name} - {urls.length} URLs loaded
+                                    </span>
+                                </div>
+                            )}
                         </div>
 
                         {/* Date Range and Email Row */}
@@ -576,7 +671,7 @@ function App() {
                             )}
                         </AnimatePresence>
 
-                        {/* Error Message */}
+                        {/* Error Messages */}
                         <AnimatePresence>
                             {error && (
                                 <motion.div
@@ -587,6 +682,17 @@ function App() {
                                 >
                                     <AlertCircle className="w-5 h-5 flex-shrink-0" />
                                     {error}
+                                </motion.div>
+                            )}
+                            {csvError && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700"
+                                >
+                                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                                    {csvError}
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -668,290 +774,398 @@ function App() {
                     )}
                 </AnimatePresence>
 
-                {/* Stats Grid */}
+                {/* Results Tabs and Actions */}
                 <AnimatePresence>
-                    {stats && (
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
-                        >
-                            <motion.div
-                                whileHover={{ scale: 1.02 }}
-                                className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-blue-100 rounded-lg">
-                                        <MessageSquare className="w-5 h-5 text-blue-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-2xl font-bold text-gray-800">{stats.totalReviews}</p>
-                                        <p className="text-sm text-gray-600">Total Reviews</p>
-                                    </div>
-                                </div>
-                            </motion.div>
-
-                            <motion.div
-                                whileHover={{ scale: 1.02 }}
-                                className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-yellow-100 rounded-lg">
-                                        <Star className="w-5 h-5 text-yellow-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-2xl font-bold text-gray-800">{stats.averageRating}⭐</p>
-                                        <p className="text-sm text-gray-600">Average Rating</p>
-                                    </div>
-                                </div>
-                            </motion.div>
-
-                            <motion.div
-                                whileHover={{ scale: 1.02 }}
-                                className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-green-100 rounded-lg">
-                                        <TrendingUp className="w-5 h-5 text-green-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-2xl font-bold text-gray-800">{stats.highRatings}</p>
-                                        <p className="text-sm text-gray-600">High Ratings (4-5★)</p>
-                                    </div>
-                                </div>
-                            </motion.div>
-
-                            <motion.div
-                                whileHover={{ scale: 1.02 }}
-                                className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-red-100 rounded-lg">
-                                        <TrendingDown className="w-5 h-5 text-red-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-2xl font-bold text-gray-800">{stats.lowRatings}</p>
-                                        <p className="text-sm text-gray-600">Low Ratings (1-2★)</p>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-                <AnimatePresence>
-                    {businessDetails && businessDetails.name && (
+                    {Object.keys(results).length > 0 && (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             className="bg-white rounded-3xl shadow-xl p-8 mb-8 border border-gray-100"
                         >
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-blue-100 rounded-lg">
-                                    <Building2 className="w-6 h-6 text-blue-600" />
-                                </div>
-                                <h3 className="text-xl font-bold text-gray-800">Business Information</h3>
-                            </div>
-
-                            <div className="grid md:grid-cols-2 gap-6">
-                                {/* Left Column */}
-                                <div className="space-y-4">
-                                    {businessDetails.name && (
-                                        <div className="flex items-start gap-3">
-                                            <Building2 className="w-5 h-5 text-gray-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Business Name</p>
-                                                <p className="text-gray-800 font-semibold">{businessDetails.name}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {businessDetails.address && (
-                                        <div className="flex items-start gap-3">
-                                            <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Address</p>
-                                                <p className="text-gray-800">{businessDetails.address}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {businessDetails.phone && (
-                                        <div className="flex items-start gap-3">
-                                            <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Phone</p>
-                                                <p className="text-gray-800">{businessDetails.phone}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {businessDetails.website && (
-                                        <div className="flex items-start gap-3">
-                                            <ExternalLink className="w-5 h-5 text-gray-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Website</p>
-                                                <a
-                                                    href={businessDetails.website}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-blue-600 hover:text-blue-800 underline"
+                            {/* Action Buttons */}
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-xl font-bold text-gray-800">Analysis Results</h3>
+                                <div className="flex items-center gap-3">
+                                    {/* Download Dropdown */}
+                                    <div className="relative download-dropdown">
+                                        <motion.button
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => setShowDownloadDropdown(!showDownloadDropdown)}
+                                            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-all"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                            Download
+                                            <ChevronDown className="w-4 h-4" />
+                                        </motion.button>
+                                        
+                                        <AnimatePresence>
+                                            {showDownloadDropdown && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: -10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    exit={{ opacity: 0, y: -10 }}
+                                                    className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[120px]"
                                                 >
-                                                    {businessDetails.website}
-                                                </a>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                                    <button
+                                                        onClick={() => downloadAllResults('csv')}
+                                                        className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2"
+                                                    >
+                                                        <FileSpreadsheet className="w-4 h-4" />
+                                                        CSV
+                                                    </button>
+                                                    <button
+                                                        onClick={() => downloadAllResults('txt')}
+                                                        className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2"
+                                                    >
+                                                        <FileText className="w-4 h-4" />
+                                                        TXT
+                                                    </button>
+                                                    <button
+                                                        onClick={() => downloadAllResults('pdf')}
+                                                        className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2"
+                                                    >
+                                                        <FileDown className="w-4 h-4" />
+                                                        PDF
+                                                    </button>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
 
-                                {/* Right Column */}
-                                <div className="space-y-4">
-                                    {businessDetails.category && (
-                                        <div className="flex items-start gap-3">
-                                            <div className="w-5 h-5 bg-purple-100 rounded mt-0.5"></div>
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Category</p>
-                                                <p className="text-gray-800">{businessDetails.category}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {businessDetails.rating && (
-                                        <div className="flex items-start gap-3">
-                                            <Star className="w-5 h-5 text-yellow-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Overall Rating</p>
-                                                <p className="text-gray-800 font-semibold">{businessDetails.rating}⭐</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {businessDetails.total_reviews && (
-                                        <div className="flex items-start gap-3">
-                                            <MessageSquare className="w-5 h-5 text-green-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Total Reviews</p>
-                                                <p className="text-gray-800">{businessDetails.total_reviews}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {businessDetails.hours && (
-                                        <div className="flex items-start gap-3">
-                                            <Clock className="w-5 h-5 text-blue-400 mt-0.5" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-500">Hours</p>
-                                                <p className="text-gray-800">{businessDetails.hours}</p>
-                                            </div>
-                                        </div>
-                                    )}
+                                    {/* Email Button */}
+                                    <motion.button
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        onClick={sendEmailResults}
+                                        disabled={sendingEmail}
+                                        className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                    >
+                                        {sendingEmail ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <Send className="w-4 h-4" />
+                                        )}
+                                        {sendingEmail ? 'Sending...' : 'Send Email'}
+                                    </motion.button>
                                 </div>
                             </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-                {/* Reviews Table */}
-                <AnimatePresence>
-                    {reviews.length > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-white rounded-3xl shadow-xl overflow-hidden mb-8 border border-gray-100"
-                        >
-                            <div className="flex items-center justify-between p-6 border-b border-gray-100">
-                                <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                    <MessageSquare className="w-6 h-6 text-blue-600" />
-                                    Reviews ({reviews.length})
-                                </h3>
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={downloadPDF}
-                                    className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-all"
-                                >
-                                    <FileDown className="w-4 h-4" />
-                                    Download PDF
-                                </motion.button>
 
-                                <motion.button
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={downloadTXT}
-                                    className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg font-medium hover:bg-gray-600 transition-all"
-                                >
-                                    <FileText className="w-4 h-4" />
-                                    Download TXT
-                                </motion.button>
-                            </div>
-
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Author</th>
-                                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</th>
-                                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Review</th>
-                                            <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Photo</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-200">
-                                        {reviews.map((review, index) => (
-                                            <motion.tr
+                            {/* Tabs */}
+                            <div className="border-b border-gray-200 mb-6">
+                                <div className="flex space-x-8 overflow-x-auto">
+                                    {urls.map((url, index) => {
+                                        const urlResults = results[url];
+                                        const hasResults = urlResults && (urlResults.reviews?.length > 0 || urlResults.businessDetails?.name);
+                                        
+                                        return (
+                                            <button
                                                 key={index}
-                                                variants={slideInVariants}
-                                                initial="hidden"
-                                                animate="visible"
-                                                transition={{ delay: index * 0.1 }}
-                                                className="hover:bg-gray-50 transition-colors"
+                                                onClick={() => setActiveTab(index)}
+                                                className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                                                    activeTab === index
+                                                        ? 'border-blue-500 text-blue-600'
+                                                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                                }`}
                                             >
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                                    {review.date}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                    <div className="flex items-center gap-2">
-                                                        <Users className="w-4 h-4 text-gray-400" />
-                                                        <span className="font-medium text-gray-800">{review.author}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRatingClass(review.rating)}`}>
-                                                        {review.rating}⭐
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="max-w-xs truncate text-sm text-gray-600">
-                                                        {review.text || 'No text provided'}
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    {review.photo && review.photo.length > 0 ? (
-                                                        <div className="flex gap-1">
-                                                            {review.photo.slice(0, 2).map((url, idx) => (
-                                                                <img
-                                                                    key={idx}
-                                                                    src={url}
-                                                                    alt={`Review image ${idx + 1}`}
-                                                                    className="w-10 h-10 rounded-lg object-cover"
-                                                                />
-                                                            ))}
-                                                            {review.photo.length > 2 && (
-                                                                <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-xs text-gray-500">
-                                                                    +{review.photo.length - 2}
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                                <div className="flex items-center gap-2">
+                                                    {hasResults ? (
+                                                        <CheckCircle2 className="w-4 h-4 text-green-500" />
                                                     ) : (
-                                                        <span className="text-gray-400">—</span>
+                                                        <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
                                                     )}
-                                                </td>
-                                            </motion.tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                                    Business {index + 1}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
+
+                            {/* Tab Content */}
+                            {urls[activeTab] && (
+                                <div>
+                                    {(() => {
+                                        const currentUrl = urls[activeTab];
+                                        const urlResults = results[currentUrl];
+                                        const stats = getStats(currentUrl);
+                                        const businessDetails = urlResults?.businessDetails;
+                                        const reviews = urlResults?.reviews || [];
+                                        
+                                        return (
+                                            <>
+                                                {/* Stats Grid */}
+                                                {stats && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, y: 20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
+                                                    >
+                                                        <motion.div
+                                                            whileHover={{ scale: 1.02 }}
+                                                            className="bg-gray-50 rounded-2xl shadow-lg p-6 border border-gray-100"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="p-2 bg-blue-100 rounded-lg">
+                                                                    <MessageSquare className="w-5 h-5 text-blue-600" />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-2xl font-bold text-gray-800">{stats.totalReviews}</p>
+                                                                    <p className="text-sm text-gray-600">Total Reviews</p>
+                                                                </div>
+                                                            </div>
+                                                        </motion.div>
+
+                                                        <motion.div
+                                                            whileHover={{ scale: 1.02 }}
+                                                            className="bg-gray-50 rounded-2xl shadow-lg p-6 border border-gray-100"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="p-2 bg-yellow-100 rounded-lg">
+                                                                    <Star className="w-5 h-5 text-yellow-600" />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-2xl font-bold text-gray-800">{stats.averageRating}⭐</p>
+                                                                    <p className="text-sm text-gray-600">Average Rating</p>
+                                                                </div>
+                                                            </div>
+                                                        </motion.div>
+
+                                                        <motion.div
+                                                            whileHover={{ scale: 1.02 }}
+                                                            className="bg-gray-50 rounded-2xl shadow-lg p-6 border border-gray-100"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="p-2 bg-green-100 rounded-lg">
+                                                                    <TrendingUp className="w-5 h-5 text-green-600" />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-2xl font-bold text-gray-800">{stats.highRatings}</p>
+                                                                    <p className="text-sm text-gray-600">High Ratings (4-5★)</p>
+                                                                </div>
+                                                            </div>
+                                                        </motion.div>
+
+                                                        <motion.div
+                                                            whileHover={{ scale: 1.02 }}
+                                                            className="bg-gray-50 rounded-2xl shadow-lg p-6 border border-gray-100"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="p-2 bg-red-100 rounded-lg">
+                                                                    <TrendingDown className="w-5 h-5 text-red-600" />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-2xl font-bold text-gray-800">{stats.lowRatings}</p>
+                                                                    <p className="text-sm text-gray-600">Low Ratings (1-2★)</p>
+                                                                </div>
+                                                            </div>
+                                                        </motion.div>
+                                                    </motion.div>
+                                                )}
+
+                                                {/* Business Information */}
+                                                {businessDetails && businessDetails.name && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, y: 20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        className="bg-gray-50 rounded-3xl shadow-xl p-8 mb-8 border border-gray-100"
+                                                    >
+                                                        <div className="flex items-center gap-3 mb-6">
+                                                            <div className="p-2 bg-blue-100 rounded-lg">
+                                                                <Building2 className="w-6 h-6 text-blue-600" />
+                                                            </div>
+                                                            <h3 className="text-xl font-bold text-gray-800">Business Information</h3>
+                                                        </div>
+
+                                                        <div className="grid md:grid-cols-2 gap-6">
+                                                            {/* Left Column */}
+                                                            <div className="space-y-4">
+                                                                {businessDetails.name && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <Building2 className="w-5 h-5 text-gray-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Business Name</p>
+                                                                            <p className="text-gray-800 font-semibold">{businessDetails.name}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {businessDetails.address && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Address</p>
+                                                                            <p className="text-gray-800">{businessDetails.address}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {businessDetails.phone && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Phone</p>
+                                                                            <p className="text-gray-800">{businessDetails.phone}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {businessDetails.website && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <ExternalLink className="w-5 h-5 text-gray-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Website</p>
+                                                                            <a
+                                                                                href={businessDetails.website}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                className="text-blue-600 hover:text-blue-800 underline"
+                                                                            >
+                                                                                {businessDetails.website}
+                                                                            </a>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Right Column */}
+                                                            <div className="space-y-4">
+                                                                {businessDetails.category && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <div className="w-5 h-5 bg-purple-100 rounded mt-0.5"></div>
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Category</p>
+                                                                            <p className="text-gray-800">{businessDetails.category}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {businessDetails.rating && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <Star className="w-5 h-5 text-yellow-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Overall Rating</p>
+                                                                            <p className="text-gray-800 font-semibold">{businessDetails.rating}⭐</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {businessDetails.total_reviews && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <MessageSquare className="w-5 h-5 text-green-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Total Reviews</p>
+                                                                            <p className="text-gray-800">{businessDetails.total_reviews}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                {businessDetails.hours && (
+                                                                    <div className="flex items-start gap-3">
+                                                                        <Clock className="w-5 h-5 text-blue-400 mt-0.5" />
+                                                                        <div>
+                                                                            <p className="text-sm font-medium text-gray-500">Hours</p>
+                                                                            <p className="text-gray-800">{businessDetails.hours}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </motion.div>
+                                                )}
+
+                                                {/* Reviews Table */}
+                                                {reviews.length > 0 && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, y: 20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        className="bg-gray-50 rounded-3xl shadow-xl overflow-hidden border border-gray-100"
+                                                    >
+                                                        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                                                            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                                                <MessageSquare className="w-6 h-6 text-blue-600" />
+                                                                Reviews ({reviews.length})
+                                                            </h3>
+                                                        </div>
+
+                                                        <div className="overflow-x-auto">
+                                                            <table className="w-full">
+                                                                <thead className="bg-gray-100">
+                                                                    <tr>
+                                                                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                                                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Author</th>
+                                                                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</th>
+                                                                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Review</th>
+                                                                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Photo</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-gray-200">
+                                                                    {reviews.map((review, index) => (
+                                                                        <motion.tr
+                                                                            key={index}
+                                                                            variants={slideInVariants}
+                                                                            initial="hidden"
+                                                                            animate="visible"
+                                                                            transition={{ delay: index * 0.1 }}
+                                                                            className="hover:bg-gray-100 transition-colors"
+                                                                        >
+                                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                                                                {review.date}
+                                                                            </td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <Users className="w-4 h-4 text-gray-400" />
+                                                                                    <span className="font-medium text-gray-800">{review.author}</span>
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRatingClass(review.rating)}`}>
+                                                                                    {review.rating}⭐
+                                                                                </span>
+                                                                            </td>
+                                                                            <td className="px-6 py-4">
+                                                                                <div className="max-w-xs truncate text-sm text-gray-600">
+                                                                                    {review.text || 'No text provided'}
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-6 py-4">
+                                                                                {review.photo && review.photo.length > 0 ? (
+                                                                                    <div className="flex gap-1">
+                                                                                        {review.photo.slice(0, 2).map((url, idx) => (
+                                                                                            <img
+                                                                                                key={idx}
+                                                                                                src={url}
+                                                                                                alt={`Review image ${idx + 1}`}
+                                                                                                className="w-10 h-10 rounded-lg object-cover"
+                                                                                            />
+                                                                                        ))}
+                                                                                        {review.photo.length > 2 && (
+                                                                                            <div className="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                                                                                                +{review.photo.length - 2}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <span className="text-gray-400">—</span>
+                                                                                )}
+                                                                            </td>
+                                                                        </motion.tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </motion.div>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
+                                </div>
+                            )}
                         </motion.div>
                     )}
                 </AnimatePresence>
+
+
             </motion.div>
         </div>
     );
