@@ -938,7 +938,7 @@ function App() {
                                         const urlResults = results[currentUrl];
                                         const stats = getStats(currentUrl);
                                         const businessDetails = urlResults?.businessDetails;
-                                        const reviews = urlResults?.reviews || [];
+                                        const reviews = Array.isArray(urlResults?.reviews) ? urlResults.reviews : [];
                                         
                                         return (
                                             <>
