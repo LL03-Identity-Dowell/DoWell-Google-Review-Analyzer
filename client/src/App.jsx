@@ -69,6 +69,38 @@ const slideInVariants = {
     }
 };
 
+// ErrorBoundary to catch render errors and display a fallback UI
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null, errorInfo: null };
+    }
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+    componentDidCatch(error, errorInfo) {
+        this.setState({ errorInfo });
+        // Optionally log error to an error reporting service
+        console.error('ErrorBoundary caught an error:', error, errorInfo);
+    }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: 40, color: 'red', background: '#fff0f0', minHeight: '100vh' }}>
+                    <h1>Something went wrong.</h1>
+                    <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error && this.state.error.toString()}</pre>
+                    {this.state.errorInfo && (
+                        <details style={{ whiteSpace: 'pre-wrap' }}>
+                            {this.state.errorInfo.componentStack}
+                        </details>
+                    )}
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 function App() {
     const [csvFile, setCsvFile] = useState(null);
     const [urls, setUrls] = useState([]);
@@ -200,42 +232,36 @@ function App() {
             // Improved review handling for multiple URLs
             socketRef.current.on('review', (data) => {
                 console.log('📝 Received reviews:', data);
-                
                 const { url, reviews: newReviews } = data;
-                
+                // Defensive: ensure newReviews is an array
                 if (!Array.isArray(newReviews)) {
                     console.warn('⚠️ Received non-array reviews:', newReviews);
                     return;
                 }
-
                 if (newReviews.length === 0) {
                     console.warn('⚠️ Received empty reviews array');
                     return;
                 }
-
-                newReviews.forEach(review => {
+                // Defensive: filter out malformed reviews
+                const safeReviews = newReviews.filter(r => r && typeof r === 'object' && !Array.isArray(r));
+                safeReviews.forEach(review => {
                     if (!Array.isArray(review.photo)) {
                         review.photo = [];
                     }
                 });
-
                 setResults(prevResults => {
                     const currentUrlResults = prevResults[url] || { reviews: [], businessDetails: {}, sentiment: '', swot: {} };
-                    
                     // Create a Set of existing review identifiers to avoid duplicates
                     const existingReviewIds = new Set(
-                        currentUrlResults.reviews.map(r => `${r.author}_${r.date}_${r.rating}`)
+                        Array.isArray(currentUrlResults.reviews) ? currentUrlResults.reviews.map(r => `${r.author}_${r.date}_${r.rating}`) : []
                     );
-
                     // Filter out duplicates
-                    const uniqueNewReviews = newReviews.filter(review => {
+                    const uniqueNewReviews = safeReviews.filter(review => {
                         const reviewId = `${review.author}_${review.date}_${review.rating}`;
                         return !existingReviewIds.has(reviewId);
                     });
-
                     const updatedReviews = [...currentUrlResults.reviews, ...uniqueNewReviews];
                     console.log(`📈 Reviews updated for ${url}: ${currentUrlResults.reviews.length} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
-
                     return {
                         ...prevResults,
                         [url]: {
@@ -1122,7 +1148,7 @@ function App() {
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody className="divide-y divide-gray-200">
-                                                                    {Array.isArray(reviews) && reviews.map((review, index) => (
+                                                                    {Array.isArray(reviews) ? reviews.map((review, index) => (
                                                                         <motion.tr
                                                                             key={index}
                                                                             variants={slideInVariants}
@@ -1151,7 +1177,7 @@ function App() {
                                                                                 </div>
                                                                             </td>
                                                                             <td className="px-6 py-4">
-                                                                                {Array.isArray(review.photo) && review.photo.length > 0 ? (
+                                                                                {Array.isArray(review.photo) && review.photo.length > 0 && (
                                                                                     <div className="flex gap-1">
                                                                                         {review.photo.slice(0, 2).map((url, idx) => (
                                                                                             <img
@@ -1167,12 +1193,13 @@ function App() {
                                                                                             </div>
                                                                                         )}
                                                                                     </div>
-                                                                                ) : (
-                                                                                    <span className="text-gray-400">—</span>
                                                                                 )}
+                                                                                {!Array.isArray(review.photo) || review.photo.length === 0 ? (
+                                                                                    <span className="text-gray-400">—</span>
+                                                                                ) : null}
                                                                             </td>
                                                                         </motion.tr>
-                                                                    ))}
+                                                                    )): null}
                                                                 </tbody>
                                                             </table>
                                                         </div>
@@ -1193,4 +1220,6 @@ function App() {
     );
 }
 
-export default App;
+export default function WrappedApp() {
+    return <ErrorBoundary><App /></ErrorBoundary>;
+}
