@@ -264,7 +264,10 @@ function App() {
                     const currentReviews = Array.isArray(currentUrlResults.reviews) ? currentUrlResults.reviews : [];
                     const updatedReviews = [...currentReviews, ...uniqueNewReviews];
 
-                    console.log(`📈 Reviews updated for ${url}: ${currentUrlResults.reviews.length} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
+                    // console.log(`📈 Reviews updated for ${url}: ${currentUrlResults.reviews.length} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
+                    const prevLength = Array.isArray(currentUrlResults?.reviews) ? currentUrlResults.reviews.length : 0;
+                    console.log(`📈 Reviews updated for ${url}: ${prevLength} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
+
                     return {
                         ...prevResults,
                         [url]: {
