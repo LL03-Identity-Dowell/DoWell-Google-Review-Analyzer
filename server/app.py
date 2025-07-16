@@ -1368,6 +1368,14 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                         new_reviews_found = True
                         reviews_processed_this_scroll += 1
                         
+                        if not isinstance(review, dict):
+                            print(f"[⚠️ WARN] Skipping malformed review for {url}")
+                            continue
+                        
+                        if not isinstance(review, dict):
+                            print(f"[⚠️ WARN] Skipping malformed review for {url}")
+                            continue
+
                         # Emit individual review
                         socketio.emit('review', {
                             'url': url,

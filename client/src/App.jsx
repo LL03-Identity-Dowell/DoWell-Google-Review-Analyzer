@@ -260,7 +260,10 @@ function App() {
                         const reviewId = `${review.author}_${review.date}_${review.rating}`;
                         return !existingReviewIds.has(reviewId);
                     });
-                    const updatedReviews = [...currentUrlResults.reviews, ...uniqueNewReviews];
+                    // const updatedReviews = [...currentUrlResults.reviews, ...uniqueNewReviews];
+                    const currentReviews = Array.isArray(currentUrlResults.reviews) ? currentUrlResults.reviews : [];
+                    const updatedReviews = [...currentReviews, ...uniqueNewReviews];
+
                     console.log(`📈 Reviews updated for ${url}: ${currentUrlResults.reviews.length} → ${updatedReviews.length} (+${uniqueNewReviews.length} new)`);
                     return {
                         ...prevResults,
