@@ -1145,7 +1145,7 @@ function App() {
                                                                                 </div>
                                                                             </td>
                                                                             <td className="px-6 py-4">
-                                                                                {review.photo && review.photo.length > 0 ? (
+                                                                                {Array.isArray(review.photo) && review.photo.length > 0 ? (
                                                                                     <div className="flex gap-1">
                                                                                         {review.photo.slice(0, 2).map((url, idx) => (
                                                                                             <img
