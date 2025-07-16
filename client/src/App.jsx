@@ -1091,7 +1091,7 @@ function App() {
                                                 )}
 
                                                 {/* Reviews Table */}
-                                                {reviews.length > 0 && (
+                                                {Array.isArray(reviews) && reviews.length > 0 && (
                                                     <motion.div
                                                         initial={{ opacity: 0, y: 20 }}
                                                         animate={{ opacity: 1, y: 0 }}
@@ -1116,7 +1116,7 @@ function App() {
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody className="divide-y divide-gray-200">
-                                                                    {reviews.map((review, index) => (
+                                                                    {Array.isArray(reviews) && reviews.map((review, index) => (
                                                                         <motion.tr
                                                                             key={index}
                                                                             variants={slideInVariants}
