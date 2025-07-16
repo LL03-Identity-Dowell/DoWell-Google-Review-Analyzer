@@ -1210,6 +1210,14 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                         if not author:
                             author = "Anonymous"
                         
+                        # Click 'More' button inside the review block to expand long reviews
+                        try:
+                            more_btn = block.find_element(By.XPATH, './/button[contains(@aria-label, "more") or contains(text(), "More")]')
+                            driver.execute_script("arguments[0].click();", more_btn)
+                            time.sleep(0.1)
+                        except:
+                            pass
+                        
                         # Extract rating with multiple approaches (robust)
                         rating = 0
                         try:
@@ -1225,7 +1233,7 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                                 stars = block.find_elements(By.CSS_SELECTOR, "span[style*='width']")
                                 if stars:
                                     style = stars[0].get_attribute("style") or ""
-                                    width_match = re.search(r'width:\\s*(\d+)%', style)
+                                    width_match = re.search(r'width:\s*(\d+)%', style)
                                     if width_match:
                                         rating = float(width_match.group(1)) / 20  # 100% = 5 stars
                             except:
@@ -1235,6 +1243,15 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                                     rating = len(star_elements)
                                 except:
                                     pass
+                        # Fallback: extract ratings like '4/5' from block text
+                        if not rating or rating == 0:
+                            try:
+                                block_text = block.text
+                                match = re.search(r'(\\d(?:\\.\\d)?)/5', block_text)
+                                if match:
+                                    rating = float(match.group(1))
+                            except:
+                                pass
                         
                         # Extract date with multiple selectors (robust)
                         date_text = ""
