@@ -1236,9 +1236,23 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                                 except:
                                     pass
                         
-                        # Extract review data continues...
-                        # Parse date
-                        date_text = block.find_element(By.CSS_SELECTOR, '.rsqaWe').text.strip()
+                        # Extract date with multiple selectors (robust)
+                        date_text = ""
+                        date_selectors = ['.rsqaWe', '.DU9Pgb', 'span[class*="rsqaWe"]']
+                        for date_selector in date_selectors:
+                            try:
+                                date_element = block.find_element(By.CSS_SELECTOR, date_selector)
+                                date_text = date_element.text.strip()
+                                break
+                            except:
+                                continue
+                        if not date_text:
+                            print("[⚠️ WARN] Could not extract date, skipping review")
+                            try:
+                                print(block.get_attribute('outerHTML'))
+                            except:
+                                pass
+                            continue
                         parsed_date = parse_relative_date(date_text)
                         
                         # Check date filter
