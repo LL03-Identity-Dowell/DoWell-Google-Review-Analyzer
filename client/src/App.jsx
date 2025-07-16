@@ -554,9 +554,8 @@ function App() {
 
     const getStats = (url) => {
         const urlResults = results[url];
-        if (!urlResults || !urlResults.reviews || !urlResults.reviews.length) return null;
-
-        const reviews = urlResults.reviews;
+        if (!urlResults || !Array.isArray(urlResults.reviews) || urlResults.reviews.length === 0) return null;
+        const reviews = Array.isArray(urlResults.reviews) ? urlResults.reviews : [];
         const totalReviews = reviews.length;
         const averageRating = (reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1);
         const highRatings = reviews.filter(r => r.rating >= 4).length;
@@ -904,7 +903,7 @@ function App() {
                                 <div className="flex space-x-8 overflow-x-auto">
                                     {urls.map((url, index) => {
                                         const urlResults = results[url];
-                                        const hasResults = urlResults && (urlResults.reviews?.length > 0 || urlResults.businessDetails?.name);
+                                        const hasResults = urlResults && (Array.isArray(urlResults.reviews) ? urlResults.reviews.length > 0 : false) || urlResults?.businessDetails?.name;
                                         
                                         return (
                                             <button
