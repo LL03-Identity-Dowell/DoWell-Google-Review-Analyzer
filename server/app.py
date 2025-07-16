@@ -27,6 +27,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import textwrap
+from selenium.common.exceptions import StaleElementReferenceException
 
 app = Flask(__name__)
 CORS(app)
@@ -994,7 +995,19 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
             # Initialize driver for this URL
             driver = init_driver()
             
-            # Extract business details robustly before scraping reviews
+            # Load the actual business URL and wait for it to load
+            driver.get(url)
+            try:
+                # Wait for a business name element to appear (up to 10 seconds)
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "h1, h1.DUwDvf, h1.fontHeadlineLarge"))
+                )
+            except Exception as e:
+                print(f"[⚠️ WAIT] Timeout waiting for business name: {e}")
+            # Optional: add a short sleep for extra safety
+            import time
+            time.sleep(1)
+            # Extract business details robustly after page load
             business_details = {
                 'name': '',
                 'address': '',
@@ -1103,10 +1116,6 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                 'businessDetails': business_details
             }, room=session_id)  # type: ignore
             
-            # Load the actual business URL
-            driver.get(url)
-            time.sleep(3)
-
             # Click Reviews tab - same logic as scrape_and_analyze
             try:
                 review_selectors = [
@@ -1190,14 +1199,94 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                 review_blocks = driver.find_elements(By.CSS_SELECTOR, '[data-review-id]')
                 new_reviews_found = False
                 reviews_processed_this_scroll = 0
-                
-                for block in review_blocks:
+                num_blocks = len(review_blocks)
+                i = 0
+                while i < num_blocks:
                     try:
+                        # Re-fetch the review blocks to avoid staleness
+                        review_blocks = driver.find_elements(By.CSS_SELECTOR, '[data-review-id]')
+                        if i >= len(review_blocks):
+                            break
+                        block = review_blocks[i]
+                        i += 1
+
+                        # Get or generate review ID
                         review_id = block.get_attribute('data-review-id')
+                        if not review_id:
+                            # Try to extract text-based content for ID
+                            try:
+                                # Get the first 50 characters of the review text for uniqueness
+                                temp_text = ""
+                                try:
+                                    temp_text_elem = block.find_element(
+                                        By.CSS_SELECTOR, ".MyEned, .wiI7pd")
+                                    temp_text = temp_text_elem.text[:50]
+                                except:
+                                    pass
+
+                                # Get author and date for ID
+                                temp_author = ""
+                                temp_date = ""
+                                try:
+                                    temp_author_elem = block.find_element(
+                                        By.CSS_SELECTOR, ".d4r55")
+                                    temp_author = temp_author_elem.text
+                                except:
+                                    pass
+                                try:
+                                    temp_date_elem = block.find_element(
+                                        By.CSS_SELECTOR, '.rsqaWe')
+                                    temp_date = temp_date_elem.text
+                                except:
+                                    pass
+
+                                # Create unique ID from available data
+                                review_id = f"{temp_author}_{temp_date}_{temp_text}".replace(
+                                    " ", "_").replace("\n", "")[:100]
+
+                                if not review_id or review_id == "__":
+                                    # Last resort: use element location
+                                    location = block.location
+                                    review_id = f"review_{location['x']}_{location['y']}"
+
+                            except Exception as e:
+                                print(f"[⚠️ ID] Could not generate review ID: {e}")
+                                continue
+
                         if review_id in processed_review_ids:
                             continue
-                            
-                        # Extract author with multiple selectors (robust)
+
+                        # Extract date with multiple selectors
+                        date_text = ""
+                        date_selectors = ['.rsqaWe', '.DU9Pgb', 'span[class*="rsqaWe"]']
+                        for date_selector in date_selectors:
+                            try:
+                                date_element = block.find_element(By.CSS_SELECTOR, date_selector)
+                                date_text = date_element.text.strip()
+                                break
+                            except:
+                                continue
+                        if not date_text:
+                            print("[⚠️ WARN] Could not extract date, skipping review")
+                            try:
+                                print(block.get_attribute('outerHTML'))
+                            except:
+                                pass
+                            continue
+                        parsed_date = parse_relative_date(date_text)
+                        
+                        # Check date filter
+                        if days != 'custom':
+                            days_int = int(days)
+                            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_int)
+                            if parsed_date < cutoff_date:
+                                continue
+                        elif custom_date:
+                            cutoff_date = datetime.datetime.strptime(custom_date, '%Y-%m-%d')
+                            if parsed_date < cutoff_date:
+                                continue
+                        
+                        # Extract author with multiple selectors
                         author = ""
                         author_selectors = [".d4r55", ".YBMEb", "div[data-href*='contrib']"]
                         for author_selector in author_selectors:
@@ -1253,36 +1342,6 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                             except:
                                 pass
                         
-                        # Extract date with multiple selectors (robust)
-                        date_text = ""
-                        date_selectors = ['.rsqaWe', '.DU9Pgb', 'span[class*="rsqaWe"]']
-                        for date_selector in date_selectors:
-                            try:
-                                date_element = block.find_element(By.CSS_SELECTOR, date_selector)
-                                date_text = date_element.text.strip()
-                                break
-                            except:
-                                continue
-                        if not date_text:
-                            print("[⚠️ WARN] Could not extract date, skipping review")
-                            try:
-                                print(block.get_attribute('outerHTML'))
-                            except:
-                                pass
-                            continue
-                        parsed_date = parse_relative_date(date_text)
-                        
-                        # Check date filter
-                        if days != 'custom':
-                            days_int = int(days)
-                            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_int)
-                            if parsed_date < cutoff_date:
-                                continue
-                        elif custom_date:
-                            cutoff_date = datetime.datetime.strptime(custom_date, '%Y-%m-%d')
-                            if parsed_date < cutoff_date:
-                                continue
-                        
                         # Extract review text
                         text = ''
                         text_selectors = [".wiI7pd", "span[jsaction*='expand']", ".review-text"]
@@ -1324,6 +1383,9 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                             'reviews': [review]
                         }, room=session_id)  # type: ignore
                         
+                    except StaleElementReferenceException:
+                        print("[⚠️ STALE] Skipping stale review block")
+                        continue
                     except Exception as e:
                         print(f"[⚠️ EXTRACT] Error extracting review: {e}")
                         continue
