@@ -166,19 +166,14 @@ def parse_relative_date(text):
 
     # Handle absolute dates first
     try:
-        # Try parsing "Month Year" format (e.g., "January 2024")
         return datetime.datetime.strptime(text, "%B %Y")
     except:
         pass
-
     try:
-        # Try parsing "Day Month Year" format (e.g., "15 January 2024")
         return datetime.datetime.strptime(text, "%d %B %Y")
     except:
         pass
-
     try:
-        # Try parsing "Month Day, Year" format (e.g., "January 15, 2024")
         return datetime.datetime.strptime(text, "%B %d, %Y")
     except:
         pass
@@ -188,50 +183,46 @@ def parse_relative_date(text):
         return now
     if 'yesterday' in text or 'a day ago' in text or '1 day ago' in text:
         return now - datetime.timedelta(days=1)
+    if 'an hour ago' in text or 'a hour ago' in text or '1 hour ago' in text:
+        return now - datetime.timedelta(hours=1)
+    if 'hours ago' in text:
+        match = re.search(r'(\d+)\s*hours?\s*ago', text)
+        if match:
+            hours = int(match.group(1))
+            return now - datetime.timedelta(hours=hours)
+    if 'a minute ago' in text or 'an minute ago' in text or '1 minute ago' in text:
+        return now - datetime.timedelta(minutes=1)
+    if 'minutes ago' in text:
+        match = re.search(r'(\d+)\s*minutes?\s*ago', text)
+        if match:
+            minutes = int(match.group(1))
+            return now - datetime.timedelta(minutes=minutes)
     if 'a week ago' in text or '1 week ago' in text:
         return now - datetime.timedelta(weeks=1)
-    if '2 weeks ago' in text or 'Two weeks ago' in text or 'two weeks ago' in text:
-        return now - datetime.timedelta(weeks=2)
+    if 'weeks ago' in text:
+        match = re.search(r'(\d+)\s*weeks?\s*ago', text)
+        if match:
+            weeks = int(match.group(1))
+            return now - datetime.timedelta(weeks=weeks)
     if 'a month ago' in text or '1 month ago' in text:
         return now - datetime.timedelta(days=30)
-    if '3 months ago' in text or 'Three months ago' in text or 'three months ago' in text:
-        return now - datetime.timedelta(days=90)
+    if 'months ago' in text:
+        match = re.search(r'(\d+)\s*months?\s*ago', text)
+        if match:
+            months = int(match.group(1))
+            return now - datetime.timedelta(days=30*months)
     if 'a year ago' in text or '1 year ago' in text:
         return now - datetime.timedelta(days=365)
-
-    # Handle hours ago
-    hour_match = re.search(r'(\d+)\s*hours?\s*ago', text)
-    if hour_match:
-        hours = int(hour_match.group(1))
-        return now - datetime.timedelta(hours=hours)
-
-    # Handle minutes ago
-    minute_match = re.search(r'(\d+)\s*minutes?\s*ago', text)
-    if minute_match:
-        minutes = int(minute_match.group(1))
-        return now - datetime.timedelta(minutes=minutes)
-
+    if 'years ago' in text:
+        match = re.search(r'(\d+)\s*years?\s*ago', text)
+        if match:
+            years = int(match.group(1))
+            return now - datetime.timedelta(days=365*years)
     # Handle numbered relative dates
     day_match = re.search(r'(\d+)\s*days?\s*ago', text)
     if day_match:
         days = int(day_match.group(1))
         return now - datetime.timedelta(days=days)
-
-    week_match = re.search(r'(\d+)\s*weeks?\s*ago', text)
-    if week_match:
-        weeks = int(week_match.group(1))
-        return now - datetime.timedelta(weeks=weeks)
-
-    month_match = re.search(r'(\d+)\s*months?\s*ago', text)
-    if month_match:
-        months = int(month_match.group(1))
-        return now - datetime.timedelta(days=30*months)
-
-    year_match = re.search(r'(\d+)\s*years?\s*ago', text)
-    if year_match:
-        years = int(year_match.group(1))
-        return now - datetime.timedelta(days=365*years)
-
     print(f"[⚠️ DATE] Could not parse date: '{text}', using current time")
     return now
 

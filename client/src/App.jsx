@@ -213,6 +213,12 @@ function App() {
                     return;
                 }
 
+                newReviews.forEach(review => {
+                    if (!Array.isArray(review.photo)) {
+                        review.photo = [];
+                    }
+                });
+
                 setResults(prevResults => {
                     const currentUrlResults = prevResults[url] || { reviews: [], businessDetails: {}, sentiment: '', swot: {} };
                     
