@@ -557,7 +557,10 @@ function App() {
         if (!urlResults || !Array.isArray(urlResults.reviews) || urlResults.reviews.length === 0) return null;
         const reviews = Array.isArray(urlResults.reviews) ? urlResults.reviews : [];
         const totalReviews = reviews.length;
-        const averageRating = (reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1);
+        // const averageRating = (reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1);
+        const averageRating = totalReviews > 0
+            ? (reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1)
+            : 'N/A';
         const highRatings = reviews.filter(r => r.rating >= 4).length;
         const lowRatings = reviews.filter(r => r.rating <= 2).length;
 
