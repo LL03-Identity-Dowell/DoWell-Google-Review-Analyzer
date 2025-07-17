@@ -276,6 +276,11 @@ function App() {
                         }
                     };
                 });
+                // Auto-switch tab to the current URL if not already active
+                const urlIndex = getUrlIndex(url);
+                if (urlIndex !== -1 && urlIndex !== activeTab) {
+                    setActiveTab(urlIndex);
+                }
             });
 
             socketRef.current.on('sentiment_update', (data) => {
@@ -312,6 +317,11 @@ function App() {
                         businessDetails: details
                     }
                 }));
+                // Auto-switch tab to the current URL if not already active
+                const urlIndex = getUrlIndex(url);
+                if (urlIndex !== -1 && urlIndex !== activeTab) {
+                    setActiveTab(urlIndex);
+                }
             });
 
             // Debug: log all socket events
@@ -332,6 +342,9 @@ function App() {
             }
         };
     }, []);
+
+    // Add this helper to get the index of a URL
+    const getUrlIndex = (url) => urls.findIndex(u => u === url);
 
     const handleCsvFileChange = (event) => {
         const file = event.target.files[0];
@@ -1152,7 +1165,6 @@ function App() {
                                                                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Author</th>
                                                                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</th>
                                                                         <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Review</th>
-                                                                        <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Photo</th>
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody className="divide-y divide-gray-200">
@@ -1183,28 +1195,6 @@ function App() {
                                                                                 <div className="max-w-xs truncate text-sm text-gray-600">
                                                                                     {review.text || 'No text provided'}
                                                                                 </div>
-                                                                            </td>
-                                                                            <td className="px-6 py-4">
-                                                                                {Array.isArray(review.photo) && review.photo.length > 0 && (
-                                                                                    <div className="flex gap-1">
-                                                                                        {review.photo.slice(0, 2).map((url, idx) => (
-                                                                                            <img
-                                                                                                key={idx}
-                                                                                                src={url}
-                                                                                                alt={`Review image ${idx + 1}`}
-                                                                                                className="w-10 h-10 rounded-lg object-cover"
-                                                                                            />
-                                                                                        ))}
-                                                                                        {review.photo.length > 2 && (
-                                                                                            <div className="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center text-xs text-gray-500">
-                                                                                                +{review.photo.length - 2}
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                )}
-                                                                                {!Array.isArray(review.photo) || review.photo.length === 0 ? (
-                                                                                    <span className="text-gray-400">—</span>
-                                                                                ) : null}
                                                                             </td>
                                                                         </motion.tr>
                                                                     )): null}

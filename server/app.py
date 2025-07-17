@@ -755,8 +755,17 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
                         continue
 
                     parsed_date = parse_relative_date(date_text)
-                    if parsed_date < cutoff_date:
-                        continue
+                    # Check date filter
+                    if days != 'custom':
+                        days_int = int(days)
+                        cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_int)
+                        if parsed_date < cutoff_date:
+                            # If review is older than cutoff, break out of the review loop for this URL
+                            break
+                    elif custom_date:
+                        cutoff_date = datetime.datetime.strptime(custom_date, '%Y-%m-%d')
+                        if parsed_date < cutoff_date:
+                            break
 
                     # Extract author with multiple selectors
                     author = ""
@@ -1284,11 +1293,12 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
                             days_int = int(days)
                             cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_int)
                             if parsed_date < cutoff_date:
-                                continue
+                                # If review is older than cutoff, break out of the review loop for this URL
+                                break
                         elif custom_date:
                             cutoff_date = datetime.datetime.strptime(custom_date, '%Y-%m-%d')
                             if parsed_date < cutoff_date:
-                                continue
+                                break
                         
                         # Extract author with multiple selectors
                         author = ""
