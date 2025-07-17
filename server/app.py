@@ -725,19 +725,33 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
 
                     # Extract date with multiple selectors
                     date_text = ""
-                    date_selectors = ['.rsqaWe',
-                                      '.DU9Pgb', 'span[class*="rsqaWe"]']
+                    date_selectors = ['.rsqaWe', '.DU9Pgb', 'span[class*="rsqaWe"]']
                     for date_selector in date_selectors:
                         try:
-                            date_element = block.find_element(
-                                By.CSS_SELECTOR, date_selector)
+                            date_element = block.find_element(By.CSS_SELECTOR, date_selector)
                             date_text = date_element.text.strip()
                             break
                         except:
                             continue
 
+                    # Fallback: try to find any span with a date-like string
+                    if not date_text:
+                        try:
+                            spans = block.find_elements(By.TAG_NAME, "span")
+                            for span in spans:
+                                text = span.text.strip()
+                                if any(keyword in text.lower() for keyword in ["ago", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "202", "201"]):
+                                    date_text = text
+                                    break
+                        except:
+                            pass
+
                     if not date_text:
                         print("[⚠️ WARN] Could not extract date, skipping review")
+                        try:
+                            print(block.get_attribute('outerHTML'))
+                        except:
+                            pass
                         continue
 
                     parsed_date = parse_relative_date(date_text)
