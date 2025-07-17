@@ -28,6 +28,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import textwrap
 from selenium.common.exceptions import StaleElementReferenceException
+from dateutil import parser
 
 app = Flask(__name__)
 CORS(app)
@@ -164,7 +165,7 @@ def parse_relative_date(text):
     now = datetime.datetime.now()
     text = text.lower().strip()
 
-    # Handle absolute dates first
+    # Handle absolute formats manually first
     try:
         return datetime.datetime.strptime(text, "%B %Y")
     except:
@@ -178,7 +179,7 @@ def parse_relative_date(text):
     except:
         pass
 
-    # Handle relative dates
+    # Relative date formats
     if 'today' in text or 'just now' in text:
         return now
     if 'yesterday' in text or 'a day ago' in text or '1 day ago' in text:
@@ -188,43 +189,41 @@ def parse_relative_date(text):
     if 'hours ago' in text:
         match = re.search(r'(\d+)\s*hours?\s*ago', text)
         if match:
-            hours = int(match.group(1))
-            return now - datetime.timedelta(hours=hours)
+            return now - datetime.timedelta(hours=int(match.group(1)))
     if 'a minute ago' in text or 'an minute ago' in text or '1 minute ago' in text:
         return now - datetime.timedelta(minutes=1)
     if 'minutes ago' in text:
         match = re.search(r'(\d+)\s*minutes?\s*ago', text)
         if match:
-            minutes = int(match.group(1))
-            return now - datetime.timedelta(minutes=minutes)
+            return now - datetime.timedelta(minutes=int(match.group(1)))
     if 'a week ago' in text or '1 week ago' in text:
         return now - datetime.timedelta(weeks=1)
     if 'weeks ago' in text:
         match = re.search(r'(\d+)\s*weeks?\s*ago', text)
         if match:
-            weeks = int(match.group(1))
-            return now - datetime.timedelta(weeks=weeks)
+            return now - datetime.timedelta(weeks=int(match.group(1)))
     if 'a month ago' in text or '1 month ago' in text:
         return now - datetime.timedelta(days=30)
     if 'months ago' in text:
         match = re.search(r'(\d+)\s*months?\s*ago', text)
         if match:
-            months = int(match.group(1))
-            return now - datetime.timedelta(days=30*months)
+            return now - datetime.timedelta(days=30 * int(match.group(1)))
     if 'a year ago' in text or '1 year ago' in text:
         return now - datetime.timedelta(days=365)
     if 'years ago' in text:
         match = re.search(r'(\d+)\s*years?\s*ago', text)
         if match:
-            years = int(match.group(1))
-            return now - datetime.timedelta(days=365*years)
-    # Handle numbered relative dates
-    day_match = re.search(r'(\d+)\s*days?\s*ago', text)
-    if day_match:
-        days = int(day_match.group(1))
-        return now - datetime.timedelta(days=days)
-    print(f"[⚠️ DATE] Could not parse date: '{text}', using current time")
-    return now
+            return now - datetime.timedelta(days=365 * int(match.group(1)))
+    match = re.search(r'(\d+)\s*days?\s*ago', text)
+    if match:
+        return now - datetime.timedelta(days=int(match.group(1)))
+
+    # 🔁 Fallback to automatic parser
+    try:
+        return parser.parse(text, fuzzy=True)
+    except Exception:
+        print(f"[⚠️ DATE] Could not parse date: '{text}', using current time")
+        return now
 
 def extract_business_details(driver):
     """Extract business details from Google Maps page"""
