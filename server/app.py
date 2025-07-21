@@ -430,6 +430,8 @@ def generate_txt_report(business_details, reviews, session_id):
     filepath = f"/tmp/{filename}"
     
     with open(filepath, 'w', encoding='utf-8') as f:
+        export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        f.write(f"Exported on: {export_date}\n\n")
         f.write("BUSINESS ANALYSIS REPORT\n")
         f.write("=" * 50 + "\n\n")
         
@@ -1477,6 +1479,8 @@ def download_csv(session_id):
         writer = csv.DictWriter(
             si, fieldnames=['date', 'author', 'rating', 'text', 'photo'])
         writer.writeheader()
+        export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        writer.writerow([f'Exported on: {export_date}'])
         writer.writerows(reviews)
         si.seek(0)
         mem = BytesIO()
@@ -1593,33 +1597,32 @@ def send_email_results():
 def generate_bulk_csv(results, session_id):
     """Generate CSV file with all business results"""
     si = StringIO()
-    writer = csv.writer(si)
-    
-    # Write header
-    writer.writerow(['Business Name', 'Address', 'Phone', 'Website', 'Category', 'Rating', 'Total Reviews', 'Hours', 'Review Date', 'Review Author', 'Review Rating', 'Review Text'])
-    
+    # Write export date as plain text before CSV header
+    export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    si.write(f'Exported on: {export_date}\n')
+
+    writer = csv.DictWriter(si, fieldnames=['Business Name', 'Address', 'Phone', 'Website', 'Category', 'Rating', 'Total Reviews', 'Hours', 'Review Date', 'Review Author', 'Review Rating', 'Review Text'])
+    writer.writeheader()
     for url, url_results in results.items():
         business_details = url_results.get('businessDetails', {})
         reviews = url_results.get('reviews', [])
-        
         if not business_details.get('name'):
             continue
-            
         for review in reviews:
-            writer.writerow([
-                business_details.get('name', ''),
-                business_details.get('address', ''),
-                business_details.get('phone', ''),
-                business_details.get('website', ''),
-                business_details.get('category', ''),
-                business_details.get('rating', ''),
-                business_details.get('total_reviews', ''),
-                business_details.get('hours', ''),
-                review.get('date', ''),
-                review.get('author', ''),
-                review.get('rating', ''),
-                review.get('text', '')
-            ])
+            writer.writerow({
+                'Business Name': business_details.get('name', ''),
+                'Address': business_details.get('address', ''),
+                'Phone': business_details.get('phone', ''),
+                'Website': business_details.get('website', ''),
+                'Category': business_details.get('category', ''),
+                'Rating': business_details.get('rating', ''),
+                'Total Reviews': business_details.get('total_reviews', ''),
+                'Hours': business_details.get('hours', ''),
+                'Review Date': review.get('date', ''),
+                'Review Author': review.get('author', ''),
+                'Review Rating': review.get('rating', ''),
+                'Review Text': review.get('text', '')
+            })
     
     si.seek(0)
     mem = BytesIO()
@@ -1648,6 +1651,9 @@ def generate_bulk_pdf(results, session_id):
         alignment=TA_CENTER
     )
     
+    export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    story.append(Paragraph(f"Exported on: {export_date}", styles['Normal']))
+
     for i, (url, url_results) in enumerate(results.items(), 1):
         business_details = url_results.get('businessDetails', {})
         reviews = url_results.get('reviews', [])
@@ -1701,7 +1707,8 @@ def generate_bulk_pdf(results, session_id):
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('WORDWRAP', (0, 0), (-1, -1), True)
             ]))
             story.append(table)
         
@@ -1718,6 +1725,8 @@ def generate_bulk_txt(results, session_id):
     filepath = f"/tmp/bulk_report_{session_id}.txt"
     
     with open(filepath, 'w', encoding='utf-8') as f:
+        export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        f.write(f"Exported on: {export_date}\n\n")
         f.write("GOOGLE REVIEWS ANALYSIS REPORT\n")
         f.write("=" * 50 + "\n\n")
         

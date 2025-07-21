@@ -1191,10 +1191,8 @@ function App() {
                                                                                     {review.rating}⭐
                                                                                 </span>
                                                                             </td>
-                                                                            <td className="px-6 py-4">
-                                                                                <div className="max-w-xs truncate text-sm text-gray-600">
-                                                                                    {review.text || 'No text provided'}
-                                                                                </div>
+                                                                            <td className="px-6 py-4 max-w-xs text-sm text-gray-600 break-words whitespace-pre-line">
+                                                                                {review.text || 'No text provided'}
                                                                             </td>
                                                                         </motion.tr>
                                                                     )): null}
