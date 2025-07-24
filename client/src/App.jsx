@@ -1157,7 +1157,7 @@ function App() {
                                                             </h3>
                                                         </div>
 
-                                                        <div className="overflow-x-auto">
+                                                        <div className="overflow-y-auto max-h-[400px]">
                                                             <table className="w-full">
                                                                 <thead className="bg-gray-100">
                                                                     <tr>

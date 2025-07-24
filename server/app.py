@@ -1477,10 +1477,11 @@ def download_csv(session_id):
         reviews = results
         si = StringIO()
         writer = csv.DictWriter(
-            si, fieldnames=['date', 'author', 'rating', 'text', 'photo'])
+            si, fieldnames=['date', 'author', 'rating', 'text'])
         writer.writeheader()
+        # Write export date as plain text before CSV header
         export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        writer.writerow([f'Exported on: {export_date}'])
+        si.write(f'Exported on: {export_date}\n')
         writer.writerows(reviews)
         si.seek(0)
         mem = BytesIO()
