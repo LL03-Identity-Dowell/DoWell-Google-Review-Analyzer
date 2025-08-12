@@ -9,6 +9,7 @@ import random
 import hashlib
 import os
 import re
+import requests
 from io import StringIO, BytesIO
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support import expected_conditions as EC
@@ -30,6 +31,11 @@ import textwrap
 from selenium.common.exceptions import StaleElementReferenceException
 from dateutil import parser
 
+# Database Configuration
+DATABASE_ID = "68908e2eb831fce6cb030f36"
+COLLECTION_NAME = "google_review_data"
+DATABASE_API_URL = "https://datacube.uxlivinglab.online/api/crud/"
+
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app,
@@ -39,6 +45,62 @@ socketio = SocketIO(app,
                     async_mode='eventlet')
 SESSIONS = {}
 ACTIVE_JOBS = {}
+
+def save_to_database(session_id, urls, email, days, custom_date, results):
+    """Save scraping results to MongoDB via API"""
+    try:
+        # Calculate metadata
+        total_businesses = len(urls) if isinstance(urls, list) else 1
+        total_reviews = 0
+        if isinstance(results, dict):
+            for url_result in results.values():
+                if isinstance(url_result, dict) and 'reviews' in url_result:
+                    total_reviews += len(url_result['reviews'])
+        elif isinstance(results, list):
+            total_reviews = len(results)
+        
+        # Prepare the payload
+        payload = {
+            "database_id": DATABASE_ID,
+            "collection_name": COLLECTION_NAME,
+            "data": [{
+                "sessionId": session_id,
+                "createdAt": datetime.datetime.now().isoformat(),
+                "updatedAt": datetime.datetime.now().isoformat(),
+                "status": "completed",
+                "urls": urls if isinstance(urls, list) else [urls],
+                "results": results,
+                "metadata": {
+                    "totalBusinesses": total_businesses,
+                    "totalReviews": total_reviews
+                },
+                "email": email or "",
+                "daysFilter": str(days) if days else "",
+                "customDate": custom_date or ""
+            }]
+        }
+        
+        # Add delay to avoid overwhelming the server
+        time.sleep(1)
+        
+        # Make API call
+        response = requests.post(
+            DATABASE_API_URL,
+            json=payload,
+            headers={'Content-Type': 'application/json'},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            print(f"[💾 DATABASE] Successfully saved session {session_id} to database")
+            return True
+        else:
+            print(f"[⚠️ DATABASE] Failed to save session {session_id}. Status: {response.status_code}, Response: {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"[❌ DATABASE] Error saving to database: {e}")
+        return False
 
 def init_driver():
     chrome_options = Options()
@@ -967,6 +1029,9 @@ def scrape_and_analyze(url, days, custom_date, email, session_id):
         }, room=session_id)  # type: ignore
 
         print(f"[�� COMPLETE] Scraping finished. Total reviews: {len(reviews)}")
+        
+        # Save to database
+        save_to_database(session_id, url, email, days, custom_date, SESSIONS[session_id])
 
     except Exception as e:
         print(f"[❌ ERROR] Scraping failed: {e}")
@@ -1463,6 +1528,9 @@ def scrape_bulk_and_analyze(urls, days, custom_date, email, session_id):
     }, room=session_id)  # type: ignore
     
     print(f"[🎉 BULK COMPLETE] Bulk scraping finished. Processed {completed_urls}/{total_urls} URLs")
+    
+    # Save to database
+    save_to_database(session_id, urls, email, days, custom_date, SESSIONS[session_id])
 
 
 @app.route('/api/download-csv/<session_id>', methods=['GET'])
@@ -1563,34 +1631,104 @@ def download_bulk_results(session_id):
         return jsonify({'error': f'Failed to generate {format_type.upper()}: {str(e)}'}), 500
 
 
+def generate_email_content(results, session_id):
+    content = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
+            .container {{ background: #fff; max-width: 700px; margin: 30px auto; border-radius: 10px; box-shadow: 0 2px 8px #e0e0e0; padding: 32px; }}
+            h1 {{ color: #2563eb; }}
+            .business {{ margin-bottom: 30px; padding: 20px; border: 1px solid #eee; border-radius: 8px; background: #fafbff; }}
+            .business h2 {{ color: #2563eb; margin-top: 0; }}
+            .details p {{ margin: 4px 0; }}
+            .reviews {{ margin-top: 15px; }}
+            .review {{ margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 4px; }}
+            .rating {{ color: #f59e0b; font-weight: bold; }}
+            .footer {{ margin-top: 40px; color: #888; font-size: 13px; text-align: center; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Google Reviews Analysis Report</h1>
+            <p>Session ID: {session_id}</p>
+            <p>Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <hr style="margin: 24px 0;">
+    """
+    for i, (url, url_results) in enumerate(results.items(), 1):
+        business_details = url_results.get('businessDetails', {})
+        reviews = url_results.get('reviews', [])
+        if not business_details.get('name'):
+            continue
+        content += f"""
+            <div class="business">
+                <h2>Business {i}: {business_details.get('name', 'Unknown')}</h2>
+                <div class="details">
+                    <p><strong>Address:</strong> {business_details.get('address', '')}</p>
+                    <p><strong>Phone:</strong> {business_details.get('phone', '')}</p>
+                    <p><strong>Website:</strong> <a href=\"{business_details.get('website', '')}\">{business_details.get('website', '')}</a></p>
+                    <p><strong>Category:</strong> {business_details.get('category', '')}</p>
+                    <p><strong>Rating:</strong> {business_details.get('rating', '')}⭐</p>
+                    <p><strong>Total Reviews:</strong> {business_details.get('total_reviews', '')}</p>
+                    <p><strong>Hours:</strong> {business_details.get('hours', '')}</p>
+                </div>
+        """
+        if reviews:
+            content += "<div class='reviews'><h3>Reviews:</h3>"
+            for review in reviews[:20]:
+                content += f"""
+                    <div class="review">
+                        <p><strong>{review.get('date', '')} - {review.get('author', '')}</strong> 
+                        <span class="rating">{review.get('rating', '')}⭐</span></p>
+                        <p>{review.get('text', '')}</p>
+                    </div>
+                """
+            content += "</div>"
+        content += "</div>"
+    content += """
+            <div class="footer">
+                <p>Powered by Dowell UX Living Lab | Google Review Extractor</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return content
+
 @app.route('/api/send-email', methods=['POST'])
 def send_email_results():
     data = request.get_json()
     results = data.get('results', {})
     email = data.get('email', '')
     session_id = data.get('sessionId', '')
-    
+
     if not results:
         return jsonify({'error': 'No results data'}), 404
-    
     if not email:
         return jsonify({'error': 'Email address required'}), 400
-    
+
     try:
-        # Generate email content
+        # Use the part before @ as the name if not provided
+        name = email.split('@')[0] if email else "User"
         email_content = generate_email_content(results, session_id)
-        
-        # Here you would integrate with your email service
-        # For now, we'll just return success
-        # You can integrate with services like SendGrid, AWS SES, etc.
-        
-        print(f"[📧 EMAIL] Would send email to {email} with {len(results)} business results")
-        
-        return jsonify({
-            'message': 'Email sent successfully',
-            'recipient': email,
-            'businesses': len(results)
-        })
+        payload = {
+            "email": email,
+            "name": email,
+            "fromName": "Dowell UX Living Lab",
+            "fromEmail": "dowell@dowellresearch.in",
+            "subject": "Google Review Extractor Data",
+            "body": email_content
+        }
+        response = requests.post(
+            "https://100085.pythonanywhere.com/api/v1/mail/0699dbbb-2786-4dfa-a1db-fc12f2210228/?type=send-email",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+        if response.status_code == 200:
+            return jsonify({'message': 'Email sent successfully', 'recipient': email})
+        else:
+            return jsonify({'error': 'Failed to send email', 'details': response.text}), 500
     except Exception as e:
         return jsonify({'error': f'Failed to send email: {str(e)}'}), 500
 
@@ -1767,75 +1905,6 @@ def generate_bulk_txt(results, session_id):
             f.write("\n" + "=" * 50 + "\n\n")
     
     return send_file(filepath, as_attachment=True, download_name=f'google_reviews_analysis_{session_id}.txt')
-
-
-def generate_email_content(results, session_id):
-    """Generate email content for all business results"""
-    content = f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .business {{ margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }}
-            .business h2 {{ color: #2563eb; margin-top: 0; }}
-            .details {{ margin: 10px 0; }}
-            .reviews {{ margin-top: 15px; }}
-            .review {{ margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 4px; }}
-            .rating {{ color: #f59e0b; font-weight: bold; }}
-        </style>
-    </head>
-    <body>
-        <h1>Google Reviews Analysis Report</h1>
-        <p>Session ID: {session_id}</p>
-        <p>Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-    """
-    
-    for i, (url, url_results) in enumerate(results.items(), 1):
-        business_details = url_results.get('businessDetails', {})
-        reviews = url_results.get('reviews', [])
-        
-        if not business_details.get('name'):
-            continue
-            
-        content += f"""
-        <div class="business">
-            <h2>Business {i}: {business_details.get('name', 'Unknown')}</h2>
-            <div class="details">
-        """
-        
-        if business_details.get('address'):
-            content += f"<p><strong>Address:</strong> {business_details['address']}</p>"
-        if business_details.get('phone'):
-            content += f"<p><strong>Phone:</strong> {business_details['phone']}</p>"
-        if business_details.get('website'):
-            content += f"<p><strong>Website:</strong> <a href='{business_details['website']}'>{business_details['website']}</a></p>"
-        if business_details.get('rating'):
-            content += f"<p><strong>Rating:</strong> {business_details['rating']}⭐</p>"
-        if business_details.get('total_reviews'):
-            content += f"<p><strong>Total Reviews:</strong> {business_details['total_reviews']}</p>"
-        
-        content += "</div>"
-        
-        if reviews:
-            content += "<div class='reviews'><h3>Reviews:</h3>"
-            for review in reviews[:20]:  # Limit to first 20 reviews
-                content += f"""
-                <div class="review">
-                    <p><strong>{review.get('date', '')} - {review.get('author', '')}</strong> 
-                    <span class="rating">{review.get('rating', '')}⭐</span></p>
-                    <p>{review.get('text', '')}</p>
-                </div>
-                """
-            content += "</div>"
-        
-        content += "</div>"
-    
-    content += """
-    </body>
-    </html>
-    """
-    
-    return content
 
 
 if __name__ == '__main__':
